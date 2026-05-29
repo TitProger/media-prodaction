@@ -54,7 +54,6 @@ async def _dl_banner(update, context):
     else:
         await msg.reply_text("Пришли баннер (фото или видео)."); return None
     await fo.download_to_drive(dest)
-    context.user_data["banner_is_video"] = dest.suffix.lower() in {".mp4",".mov",".avi",".mkv"}
     return dest
 
 async def cmd_start(update, context):
@@ -116,13 +115,11 @@ async def _run_pipeline(update, context):
 
         await bot.send_message(chat_id, "🎬 Рендерю видео (FFmpeg)…")
         print("[PIPELINE] ffmpeg start", flush=True)
-        _t=ud[_KEY_TOP]; _b=ud[_KEY_BOTTOM]; _bn=ud[_KEY_BANNER]
-        _iv=ud.get("banner_is_video", False); _o=wd/"output.mp4"
+        _t=ud[_KEY_TOP]; _b=ud[_KEY_BOTTOM]; _bn=ud[_KEY_BANNER]; _o=wd/"output.mp4"
         out = await loop.run_in_executor(None, lambda: compose(
             top_video=_t, bottom_video=_b, banner_image=_bn, subtitle_file=ass,
             output_path=_o, banner_appear_at=BANNER_APPEAR_AT_SEC,
-            banner_duration=BANNER_DURATION_SEC, banner_fade=BANNER_FADE_SEC,
-            banner_is_video=_iv))
+            banner_duration=BANNER_DURATION_SEC, banner_fade=BANNER_FADE_SEC))
         print(f"[PIPELINE] ffmpeg done {out}", flush=True)
 
         await bot.send_message(chat_id, "✅ Готово! Отправляю видео…")

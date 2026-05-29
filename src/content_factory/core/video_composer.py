@@ -57,6 +57,9 @@ def _fc(subtitle_file, banner_appear_at, banner_duration, banner_fade,
     )
 
 
+_VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
+
+
 def compose(
     top_video, bottom_video, banner_image, subtitle_file, output_path, *,
     banner_appear_at=BANNER_APPEAR_AT_SEC,
@@ -64,10 +67,13 @@ def compose(
     banner_fade=BANNER_FADE_SEC,
     banner_margin_top=BANNER_MARGIN_TOP,
     banner_margin_left=BANNER_MARGIN_LEFT,
-    banner_is_video=False,
+    banner_is_video=None,
 ):
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if banner_is_video is None:
+        banner_is_video = Path(banner_image).suffix.lower() in _VIDEO_EXTENSIONS
 
     fc = _fc(subtitle_file, banner_appear_at, banner_duration, banner_fade,
              banner_margin_top, banner_margin_left, banner_is_video)
