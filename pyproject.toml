@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "content-factory"
+version = "0.1.0"
+description = "Automated short-form video factory for YouTube Shorts and TikTok Reels"
+requires-python = ">=3.10"
+dependencies = [
+    "openai-whisper",
+    "gradio>=4.0",
+    "ffmpeg-python",
+    "srt",
+    "python-telegram-bot>=20.0",
+    "python-dotenv",
+]
+
+[project.optional-dependencies]
+dev = ["black", "ruff", "pytest"]
+
+[tool.black]
+line-length = 88
+target-version = ["py310"]
+
+[tool.ruff]
+line-length = 88
+select = ["E", "F", "I"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
