@@ -35,7 +35,8 @@ HALF_HEIGHT = OUTPUT_HEIGHT // 2   # 960 px each panel
 # ---------------------------------------------------------------------------
 SUBTITLE_FONT_NAME = "Arial"
 SUBTITLE_FONT_SIZE = 90                 # large — visible on phone screens
-SUBTITLE_PRIMARY_COLOR = "&H0050F5FF"   # slightly warm yellow-white (AABBGGRR: R=FF, G=F5, B=50)
+SUBTITLE_PRIMARY_COLOR = "&H0050F5FF"    # yellow (word being spoken — karaoke fill)
+SUBTITLE_SECONDARY_COLOR = "&H00FFFFFF" # white (upcoming words)
 SUBTITLE_OUTLINE_COLOR = "&H00000000"   # black outline
 SUBTITLE_BACK_COLOR = "&H00000000"      # no background box
 SUBTITLE_BOLD = 1

@@ -123,10 +123,15 @@ async def _run_pipeline(update, context):
         print(f"[PIPELINE] ffmpeg done {out}", flush=True)
 
         await bot.send_message(chat_id, "✅ Готово! Отправляю видео…")
+        size_mb = out.stat().st_size / 1024 / 1024
         with open(out, "rb") as f:
-            await bot.send_video(chat_id, video=f,
-                caption="🎬 Шортс готов! Напиши /start чтобы сделать новый.",
-                supports_streaming=True)
+            if size_mb <= 50:
+                await bot.send_video(chat_id, video=f,
+                    caption="🎬 Шортс готов! Напиши /start чтобы сделать новый.",
+                    supports_streaming=True)
+            else:
+                await bot.send_document(chat_id, document=f,
+                    caption=f"🎬 Шортс готов ({size_mb:.0f} МБ — отправлен как файл).\nНапиши /start чтобы сделать новый.")
     except Exception as exc:
         import traceback
         print(f"[PIPELINE] ERROR:\n{traceback.format_exc()}", flush=True)

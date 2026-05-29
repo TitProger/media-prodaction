@@ -9,7 +9,8 @@ Run via:  python main.py
 from __future__ import annotations
 
 import logging
-import tempfile
+import shutil
+import time
 import uuid
 from pathlib import Path
 
@@ -29,12 +30,30 @@ from content_factory.core.video_composer import compose
 
 logger = logging.getLogger(__name__)
 
+_OUTPUT_TTL_HOURS = 24
+
+
+def _cleanup_old_jobs() -> str:
+    """Delete job folders older than _OUTPUT_TTL_HOURS. Returns a status string."""
+    if not OUTPUT_DIR.exists():
+        return "Папка output/ не существует."
+    cutoff = time.time() - _OUTPUT_TTL_HOURS * 3600
+    removed, kept = 0, 0
+    for job_dir in OUTPUT_DIR.iterdir():
+        if job_dir.is_dir() and job_dir.stat().st_mtime < cutoff:
+            shutil.rmtree(job_dir, ignore_errors=True)
+            removed += 1
+        else:
+            kept += 1
+    return f"Удалено: {removed} папок старше {_OUTPUT_TTL_HOURS}ч. Осталось: {kept}."
+
 
 def _run_pipeline(
     top_video_path: str,
     bottom_video_path: str,
     banner_path: str,
     whisper_model: str,
+    fit_mode: str,
     banner_appear_at: float,
     banner_duration: float,
     banner_fade: float,
@@ -69,6 +88,7 @@ def _run_pipeline(
             banner_image=banner_path,
             subtitle_file=ass_file,
             output_path=output_path,
+            fit_mode=fit_mode,
             banner_appear_at=banner_appear_at,
             banner_duration=banner_duration,
             banner_fade=banner_fade,
@@ -112,6 +132,13 @@ def build_ui() -> gr.Blocks:
                     info="tiny — быстро, large — точнее",
                 )
 
+                fit_mode = gr.Radio(
+                    choices=[("Обрезка (crop)", "crop"), ("Чёрные полосы (pad)", "pad")],
+                    value="crop",
+                    label="Режим вписывания видео в слот",
+                    info="crop — заполняет весь слот, срезает края. pad — сохраняет весь кадр, добавляет чёрные полосы.",
+                )
+
                 gr.Markdown("**Баннер**")
                 banner_appear_at = gr.Slider(
                     0, 30, value=BANNER_APPEAR_AT_SEC, step=0.5,
@@ -134,9 +161,13 @@ def build_ui() -> gr.Blocks:
                     label="Отступ слева (px)",
                 )
 
-        run_btn = gr.Button("🚀 Создать шортс", variant="primary", size="lg")
+        with gr.Row():
+            run_btn = gr.Button("🚀 Создать шортс", variant="primary", size="lg")
+            clean_btn = gr.Button(f"🗑 Очистить output/ (>{_OUTPUT_TTL_HOURS}ч)", size="lg")
         status = gr.Textbox(label="Статус", interactive=False)
         output_video = gr.Video(label="Результат", interactive=False)
+
+        clean_btn.click(fn=_cleanup_old_jobs, inputs=[], outputs=[status])
 
         run_btn.click(
             fn=_run_pipeline,
@@ -145,6 +176,7 @@ def build_ui() -> gr.Blocks:
                 bottom_video,
                 banner,
                 whisper_model,
+                fit_mode,
                 banner_appear_at,
                 banner_duration,
                 banner_fade,

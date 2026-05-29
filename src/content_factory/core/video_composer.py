@@ -11,9 +11,34 @@ from content_factory.config.settings import (
 
 logger = logging.getLogger(__name__)
 
+_VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
+
+
+def _slot_filter(index: int, fit_mode: str) -> str:
+    """
+    Build the FFmpeg filter chain for one video slot (top or bottom).
+
+    fit_mode="crop" — scale up + center-crop to fill the slot (default).
+                      Edges are clipped; nothing is distorted.
+    fit_mode="pad"  — scale down + black bars to fit the slot.
+                      Full frame is preserved; letterbox/pillarbox applied.
+    """
+    w, h = OUTPUT_WIDTH, HALF_HEIGHT
+    label = "top" if index == 0 else "bot"
+    if fit_mode == "pad":
+        return (
+            f"[{index}:v]scale={w}:{h}:force_original_aspect_ratio=decrease,"
+            f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black[{label}]"
+        )
+    # default: crop
+    return (
+        f"[{index}:v]scale={w}:{h}:force_original_aspect_ratio=increase,"
+        f"crop={w}:{h}[{label}]"
+    )
+
 
 def _fc(subtitle_file, banner_appear_at, banner_duration, banner_fade,
-        banner_margin_top, banner_margin_left, banner_is_video):
+        banner_margin_top, banner_margin_left, banner_is_video, fit_mode):
     fade_out_start = banner_appear_at + banner_duration - banner_fade
     banner_end = banner_appear_at + banner_duration
     bw = OUTPUT_WIDTH - banner_margin_left * 2
@@ -22,7 +47,6 @@ def _fc(subtitle_file, banner_appear_at, banner_duration, banner_fade,
     ap = str(subtitle_file).replace("\\", "/").replace(":", "\\:")
 
     if banner_is_video:
-        # Video banner: trim to duration, offset PTS to appear at the right time
         bp = (
             f"[2:v]scale={bw}:-2,"
             f"trim=duration={banner_duration},"
@@ -30,21 +54,18 @@ def _fc(subtitle_file, banner_appear_at, banner_duration, banner_fade,
             f"format=rgba[bscaled];"
         )
     else:
-        # Static image: loop single frame at output fps, then limit to banner_end seconds
         bp = (
             f"[2:v]"
-            f"loop=loop=-1:size=1:start=0,"   # loop the one frame forever
-            f"fps={OUTPUT_FPS},"               # at output framerate (no crazy fps)
-            f"trim=duration={banner_end},"     # cut at banner end time
+            f"loop=loop=-1:size=1:start=0,"
+            f"fps={OUTPUT_FPS},"
+            f"trim=duration={banner_end},"
             f"scale={bw}:-2,"
             f"format=rgba[bscaled];"
         )
 
     return (
-        f"[0:v]scale={OUTPUT_WIDTH}:{HALF_HEIGHT}:force_original_aspect_ratio=increase,"
-        f"crop={OUTPUT_WIDTH}:{HALF_HEIGHT}[top];"
-        f"[1:v]scale={OUTPUT_WIDTH}:{HALF_HEIGHT}:force_original_aspect_ratio=increase,"
-        f"crop={OUTPUT_WIDTH}:{HALF_HEIGHT}[bot];"
+        _slot_filter(0, fit_mode) + ";"
+        + _slot_filter(1, fit_mode) + ";"
         "[top][bot]vstack=inputs=2[stacked];"
         f"[stacked]subtitles='{ap}'[subbed];"
         + bp +
@@ -57,9 +78,6 @@ def _fc(subtitle_file, banner_appear_at, banner_duration, banner_fade,
     )
 
 
-_VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
-
-
 def compose(
     top_video, bottom_video, banner_image, subtitle_file, output_path, *,
     banner_appear_at=BANNER_APPEAR_AT_SEC,
@@ -68,7 +86,12 @@ def compose(
     banner_margin_top=BANNER_MARGIN_TOP,
     banner_margin_left=BANNER_MARGIN_LEFT,
     banner_is_video=None,
+    fit_mode: str = "crop",
 ):
+    """
+    fit_mode: "crop" (default) — fill the slot, clip edges.
+              "pad"            — preserve full frame, add black bars.
+    """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -76,13 +99,13 @@ def compose(
         banner_is_video = Path(banner_image).suffix.lower() in _VIDEO_EXTENSIONS
 
     fc = _fc(subtitle_file, banner_appear_at, banner_duration, banner_fade,
-             banner_margin_top, banner_margin_left, banner_is_video)
+             banner_margin_top, banner_margin_left, banner_is_video, fit_mode)
 
     cmd = [
         "ffmpeg", "-y",
         "-i", str(top_video),
         "-i", str(bottom_video),
-        "-i", str(banner_image),   # plain -i, no -loop (looping handled in filter)
+        "-i", str(banner_image),
         "-filter_complex", fc,
         "-map", "[out]",
         "-map", "0:a",
@@ -92,7 +115,7 @@ def compose(
         str(output_path),
     ]
 
-    logger.info("Running FFmpeg…")
+    logger.info("Running FFmpeg… (fit_mode=%s)", fit_mode)
     print(f"[FFMPEG] filter_complex:\n{fc}\n", flush=True)
     result = subprocess.run(cmd, capture_output=True, text=True)
 
