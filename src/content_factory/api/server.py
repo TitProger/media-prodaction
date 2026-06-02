@@ -12,10 +12,10 @@ from __future__ import annotations
 
 import shutil
 import uuid
-from pathlib import Path
+from pathlib import Path as FilePath
 from typing import Annotated, Literal
 
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Path, UploadFile
 from fastapi.openapi.utils import get_openapi
 from pydantic import BaseModel, Field
 
@@ -143,7 +143,7 @@ async def upload_file(
     file: Annotated[UploadFile, File(description="The media file to upload")],
 ) -> UploadOut:
     storage_dir = get_storage_path(user_id, category, subtype="source")
-    suffix = Path(file.filename or "").suffix or ".mp4"
+    suffix = FilePath(file.filename or "").suffix or ".mp4"
     dest = storage_dir / f"{uuid.uuid4().hex}{suffix}"
 
     with open(dest, "wb") as fh:

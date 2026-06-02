@@ -20,7 +20,7 @@ OUTPUT_DIR = ROOT_DIR / "output"
 OUTPUT_WIDTH = 1080
 OUTPUT_HEIGHT = 1920
 OUTPUT_FPS = 30
-OUTPUT_CRF = 18          # quality: lower = better (18-23 is sane range)
+OUTPUT_CRF = 26          # quality: lower = better (23-28 is good for Shorts/Reels)
 OUTPUT_PRESET = "fast"   # ffmpeg preset: ultrafast/fast/medium/slow
 
 # ---------------------------------------------------------------------------
@@ -65,10 +65,12 @@ API_HOST = os.environ.get("API_HOST", "0.0.0.0")
 API_PORT = int(os.environ.get("API_PORT", "8001"))
 
 # ---------------------------------------------------------------------------
-# Claude API  (used for smart clip-finding in long videos)
+# AI provider for clip-finding  (Gemini by default, Claude as fallback)
 # ---------------------------------------------------------------------------
+GEMINI_API_KEY  = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_MODEL    = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash-lite")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-5")
+CLAUDE_MODEL    = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")
 
 # ---------------------------------------------------------------------------
 # Clip-finding parameters  (top_video — AI-powered)
@@ -90,8 +92,17 @@ TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 # ---------------------------------------------------------------------------
 # Banner overlay
 # ---------------------------------------------------------------------------
-BANNER_APPEAR_AT_SEC = 3.0    # when the banner fades in
-BANNER_DURATION_SEC = 5.0     # how long it stays visible
-BANNER_FADE_SEC = 0.4         # fade-in / fade-out duration
-BANNER_MARGIN_TOP = 60        # px from the top of the frame
-BANNER_MARGIN_LEFT = 20       # px from the left edge
+BANNER_APPEAR_AT_SEC  = 3.0   # when the banner first appears
+BANNER_DURATION_SEC   = 5.0   # used only in "fade" mode (how long it stays)
+BANNER_FADE_SEC       = 0.4   # slide / fade transition duration (seconds)
+BANNER_MARGIN_TOP     = OUTPUT_HEIGHT // 2 + 40   # 1000 px — just below subtitle split line
+BANNER_MARGIN_LEFT    = 20    # px from the left (and right) edge
+
+# Animation mode: "slide_left" | "slide_right" | "fade"
+#   slide_left  — enters from left,  exits to right, loops forever
+#   slide_right — enters from right, exits to left,  loops forever
+#   fade        — classic fade-in/fade-out (disappears after BANNER_DURATION_SEC)
+BANNER_ANIMATION      = os.environ.get("BANNER_ANIMATION", "slide_left")
+
+# How many seconds one full slide cycle lasts (in + stay + out)
+BANNER_LOOP_INTERVAL  = float(os.environ.get("BANNER_LOOP_INTERVAL", "7.0"))

@@ -18,6 +18,7 @@ dependencies = [
     "uvicorn[standard]>=0.29",
     "python-multipart>=0.0.9",
     "anthropic>=0.36",
+    "google-genai>=1.0",
 ]
 
 [project.optional-dependencies]

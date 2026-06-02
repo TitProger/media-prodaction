@@ -40,6 +40,7 @@ from telegram.ext import (
 )
 
 from content_factory.config.settings import (
+    BANNER_ANIMATION,
     BANNER_APPEAR_AT_SEC,
     BANNER_DURATION_SEC,
     BANNER_FADE_SEC,
@@ -218,11 +219,17 @@ def _kb_gen_banner(banners: list) -> InlineKeyboardMarkup:
 
 
 def _kb_gen_confirm() -> InlineKeyboardMarkup:
+    """Confirm screen — choose banner animation style before generating."""
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎬 Сгенерировать!", callback_data="gen_run")],
+        [InlineKeyboardButton("🎞 Анимация баннера:", callback_data="noop")],
+        [
+            InlineKeyboardButton("◀️ Слева",   callback_data="gen_run:slide_left"),
+            InlineKeyboardButton("▶️ Справа",  callback_data="gen_run:slide_right"),
+            InlineKeyboardButton("✨ Фейд",    callback_data="gen_run:fade"),
+        ],
         [
             InlineKeyboardButton("✏️ Изменить", callback_data="gen_step:top"),
-            InlineKeyboardButton("⬅️ Меню",    callback_data="menu:main"),
+            InlineKeyboardButton("⬅️ Меню",     callback_data="menu:main"),
         ],
     ])
 
@@ -646,8 +653,16 @@ async def cb_gen_step(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 # ─── Callback: run generation ─────────────────────────────────────────────────
 
+async def cb_noop(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """No-op handler for label-only buttons."""
+    await update.callback_query.answer()
+
+
 async def cb_gen_run(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     q = update.callback_query
+    # callback_data format: "gen_run:{animation}" e.g. "gen_run:slide_left"
+    parts = q.data.split(":")
+    banner_animation = parts[1] if len(parts) > 1 else BANNER_ANIMATION
     await q.answer("🎬 Запускаю!")
     user_id = q.from_user.id
 
@@ -699,6 +714,7 @@ async def cb_gen_run(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         bottom_path=bot_clip["file_path"],
         banner_path=banner["file_path"],
         work_dir=work_dir,
+        banner_animation=banner_animation,
     ))
 
 
@@ -1003,6 +1019,7 @@ async def _run_gen_pipeline(
     *, chat_id: int, bot,
     top_clip_id: int, top_path: str, bottom_path: str,
     banner_path: str, work_dir: Path,
+    banner_animation: str = BANNER_ANIMATION,
 ) -> None:
     try:
         loop = asyncio.get_running_loop()
@@ -1022,6 +1039,7 @@ async def _run_gen_pipeline(
                 banner_appear_at=BANNER_APPEAR_AT_SEC,
                 banner_duration=BANNER_DURATION_SEC,
                 banner_fade=BANNER_FADE_SEC,
+                banner_animation=banner_animation,
             ),
         )
 
@@ -1030,6 +1048,22 @@ async def _run_gen_pipeline(
 
         await bot.send_message(chat_id, "✅ Готово! Отправляю видео…")
         size_mb = out.stat().st_size / 1024 / 1024
+
+        # Auto-compress if file is too large for Telegram (50 MB limit)
+        if size_mb > 45:
+            await bot.send_message(chat_id, f"⚙️ Файл {size_mb:.0f} МБ — сжимаю для отправки…")
+            compressed = out.with_stem(out.stem + "_compressed")
+            import subprocess as _sp
+            _sp.run([
+                "ffmpeg", "-y", "-i", str(out),
+                "-c:v", "libx264", "-crf", "32", "-preset", "fast",
+                "-c:a", "aac", "-b:a", "128k",
+                "-movflags", "+faststart", str(compressed),
+            ], capture_output=True)
+            if compressed.exists() and compressed.stat().st_size < out.stat().st_size:
+                out = compressed
+                size_mb = out.stat().st_size / 1024 / 1024
+
         with open(out, "rb") as f:
             if size_mb <= 50:
                 await bot.send_video(
@@ -1166,8 +1200,9 @@ def build_bot() -> Application:
     app.add_handler(CallbackQueryHandler(cb_gen_top,  pattern=r"^gen_top:\d+$"))
     app.add_handler(CallbackQueryHandler(cb_gen_bot,  pattern=r"^gen_bot:\d+$"))
     app.add_handler(CallbackQueryHandler(cb_gen_ban,  pattern=r"^gen_ban:\d+$"))
-    app.add_handler(CallbackQueryHandler(cb_gen_run,  pattern=r"^gen_run$"))
+    app.add_handler(CallbackQueryHandler(cb_gen_run,  pattern=r"^gen_run:(slide_left|slide_right|fade)$"))
     app.add_handler(CallbackQueryHandler(cb_gen_step, pattern=r"^gen_step:(top|bottom|banner)$"))
+    app.add_handler(CallbackQueryHandler(cb_noop,     pattern=r"^noop$"))
 
     # Catch-all callback — fires if nothing above matched (diagnostic)
     app.add_handler(CallbackQueryHandler(_cb_catch_all))
