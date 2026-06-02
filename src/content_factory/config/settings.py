@@ -52,6 +52,37 @@ WHISPER_MODEL = "base"
 WHISPER_LANGUAGE = None  # None = auto-detect
 
 # ---------------------------------------------------------------------------
+# Storage — media library (separate from per-job output/)
+# ---------------------------------------------------------------------------
+STORAGE_DIR = ROOT_DIR / "storage"
+LIBRARY_DB = STORAGE_DIR / "library.db"
+
+# ---------------------------------------------------------------------------
+# REST API (FastAPI upload server for large files)
+# ---------------------------------------------------------------------------
+API_SECRET_KEY = os.environ.get("API_SECRET_KEY", "changeme-set-in-env")
+API_HOST = os.environ.get("API_HOST", "0.0.0.0")
+API_PORT = int(os.environ.get("API_PORT", "8001"))
+
+# ---------------------------------------------------------------------------
+# Claude API  (used for smart clip-finding in long videos)
+# ---------------------------------------------------------------------------
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-5")
+
+# ---------------------------------------------------------------------------
+# Clip-finding parameters  (top_video — AI-powered)
+# ---------------------------------------------------------------------------
+CLIP_COUNT        = int(os.environ.get("CLIP_COUNT", "10"))   # target clips per video
+CLIP_MIN_DURATION = float(os.environ.get("CLIP_MIN_DURATION", "15"))  # seconds
+CLIP_MAX_DURATION = float(os.environ.get("CLIP_MAX_DURATION", "60"))  # seconds
+
+# ---------------------------------------------------------------------------
+# Bottom-video split  (bottom_video — simple time-based)
+# ---------------------------------------------------------------------------
+BOTTOM_CLIP_DURATION = float(os.environ.get("BOTTOM_CLIP_DURATION", "60"))  # seconds per chunk
+
+# ---------------------------------------------------------------------------
 # Telegram bot
 # ---------------------------------------------------------------------------
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")

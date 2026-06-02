@@ -25,6 +25,13 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 
+# Убираем спам getUpdates из httpx — оставляем только полезные запросы
+class _SuppressGetUpdates(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "getUpdates" not in record.getMessage()
+
+logging.getLogger("httpx").addFilter(_SuppressGetUpdates())
+
 
 def _launch_ui(host: str, port: int, share: bool) -> None:
     from content_factory.ui.app import build_ui
@@ -37,6 +44,31 @@ def _launch_bot() -> None:
     from content_factory.bot.bot import run_bot
 
     run_bot()
+
+
+def _launch_api(host: str, port: int) -> None:
+    import uvicorn
+    from content_factory.api.server import app
+
+    uvicorn.run(app, host=host, port=port)
+
+
+def _launch_all(api_host: str, api_port: int) -> None:
+    """Run FastAPI (background thread) + Telegram bot (main thread) together."""
+    import threading
+    import uvicorn
+    from content_factory.api.server import app as api_app
+    from content_factory.bot.bot import run_bot
+
+    api_thread = threading.Thread(
+        target=lambda: uvicorn.run(api_app, host=api_host, port=api_port),
+        daemon=True,
+        name="api-server",
+    )
+    api_thread.start()
+    logging.info("API server → http://%s:%s  |  Swagger → http://%s:%s/docs", api_host, api_port, api_host, api_port)
+
+    run_bot()  # blocks until CTRL+C; daemon thread dies with it
 
 
 def _cli_compose(args: argparse.Namespace) -> None:
@@ -72,6 +104,16 @@ def main() -> None:
     # --- Bot sub-command ---
     subparsers.add_parser("bot", help="Launch Telegram bot")
 
+    # --- API sub-command ---
+    api_parser = subparsers.add_parser("api", help="Launch FastAPI upload server only (port 8001)")
+    api_parser.add_argument("--host", default="0.0.0.0")
+    api_parser.add_argument("--port", type=int, default=8001)
+
+    # --- All-in-one sub-command (default when no sub-command given for bot mode) ---
+    all_parser = subparsers.add_parser("start", help="Launch Telegram bot + FastAPI server together")
+    all_parser.add_argument("--api-host", default="0.0.0.0")
+    all_parser.add_argument("--api-port", type=int, default=8001)
+
     # --- CLI sub-command ---
     cli_parser = subparsers.add_parser("compose", help="Run pipeline from CLI (no UI)")
     cli_parser.add_argument("--top", required=True, help="Top video path")
@@ -85,6 +127,10 @@ def main() -> None:
         _cli_compose(args)
     elif args.command == "bot":
         _launch_bot()
+    elif args.command == "api":
+        _launch_api(args.host, args.port)
+    elif args.command == "start":
+        _launch_all(args.api_host, args.api_port)
     else:
         # Default: launch UI (even if no sub-command given)
         host = getattr(args, "host", "127.0.0.1")

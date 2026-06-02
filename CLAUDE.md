@@ -24,6 +24,10 @@ python main.py ui --host 0.0.0.0 --port 8000 --share
 # Telegram bot
 python main.py bot
 
+# FastAPI upload server — http://0.0.0.0:8001/docs
+python main.py api
+python main.py api --host 127.0.0.1 --port 9000
+
 # CLI (headless)
 python main.py compose --top top.mp4 --bottom bottom.mp4 --banner banner.png --output result.mp4
 ```
@@ -40,15 +44,26 @@ pytest tests/test_foo.py::test_bar  # single test
 ## Architecture
 
 ```
-main.py                            ← CLI dispatcher (routes to ui / bot / compose)
+main.py                            ← CLI dispatcher (routes to ui / bot / api / compose)
 src/content_factory/
-  config/settings.py               ← ALL tunable parameters (video, subtitle, banner, paths)
+  config/settings.py               ← ALL tunable parameters (video, subtitle, banner, paths, API key)
   core/
     subtitle_generator.py          ← Whisper transcription → .ass subtitle file
     video_composer.py              ← FFmpeg filter_complex graph builder + encoder
+  db/
+    library.py                     ← SQLite CRUD for the per-user media library
+  api/
+    server.py                      ← FastAPI upload/list/delete endpoints (port 8001)
   ui/app.py                        ← Gradio interface (calls core directly)
-  bot/bot.py                       ← python-telegram-bot conversational flow (async)
+  bot/bot.py                       ← Telegram bot: inline-menu + library + create-shorts flow
 output/                            ← per-job working directories created at runtime
+storage/
+  library.db                       ← SQLite metadata (names, paths, sizes)
+  library/{user_id}/
+    top_videos/                    ← верхние видео
+    bottom_videos/                 ← нижние видео
+    banners/images/                ← фото-баннеры
+    banners/videos/                ← видео-баннеры
 ```
 
 ### Core Pipeline (shared by all interfaces)
@@ -79,6 +94,8 @@ Everything is in `src/content_factory/config/settings.py`. Frequently tuned valu
 | `BANNER_APPEAR_AT_SEC` | `3.0` | When banner fades in |
 | `BANNER_DURATION_SEC` | `5.0` | How long banner stays visible |
 | `TELEGRAM_BOT_TOKEN` | `""` | Set before running bot mode |
+| `API_SECRET_KEY` | `"changeme-set-in-env"` | `X-API-Key` header for FastAPI |
+| `API_PORT` | `8001` | Port for the upload API server |
 
 ## FFmpeg Filter Graph
 

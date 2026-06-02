@@ -14,6 +14,10 @@ dependencies = [
     "srt",
     "python-telegram-bot>=20.0",
     "python-dotenv",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "python-multipart>=0.0.9",
+    "anthropic>=0.36",
 ]
 
 [project.optional-dependencies]
