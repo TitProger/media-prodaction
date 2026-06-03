@@ -52,6 +52,10 @@ router = APIRouter(prefix="/ui", include_in_schema=False)
 
 _WEB_DIR = Path(__file__).parent.parent / "ui" / "web"
 
+# Only one Whisper / FFmpeg-heavy job at a time — prevents segfaults from
+# multiple threads loading the model simultaneously.
+_heavy_sem = asyncio.Semaphore(1)
+
 
 # ─── SPA ─────────────────────────────────────────────────────────────────────
 
@@ -175,69 +179,70 @@ async def api_job_cut(body: dict) -> dict:
 
 
 async def _run_cut(job_id: str, row, category: str) -> None:
-    import asyncio as _aio
-    loop = _aio.get_event_loop()
+    loop = asyncio.get_event_loop()
 
-    job_store.update(job_id, state="running", message="Нарезка запущена…")
-    try:
-        source_path = Path(row["file_path"])
-        source_stem = source_path.stem
-        clips_dir = get_storage_path(
-            WEB_USER_ID, category, subtype="clip", source_stem=source_stem
-        )
-
-        if category == "bottom_video":
-            from content_factory.core.video_cutter import split_by_duration
-
-            job_store.update(job_id, message="Нарезка по времени…")
-            saved = await loop.run_in_executor(
-                None,
-                lambda: split_by_duration(
-                    source_path, clips_dir,
-                    chunk_sec=BOTTOM_CLIP_DURATION,
-                    source_stem=source_stem,
-                ),
+    job_store.update(job_id, message="Ожидание очереди…")
+    async with _heavy_sem:
+        job_store.update(job_id, state="running", message="Нарезка запущена…")
+        try:
+            source_path = Path(row["file_path"])
+            source_stem = source_path.stem
+            clips_dir = get_storage_path(
+                WEB_USER_ID, category, subtype="clip", source_stem=source_stem
             )
-            for i, p in enumerate(saved, 1):
-                add_file(
-                    WEB_USER_ID,
-                    f"Часть {i}",
-                    category,
-                    p,
-                    subtype="clip",
-                    parent_id=row["id"],
+
+            if category == "bottom_video":
+                from content_factory.core.video_cutter import split_by_duration
+
+                job_store.update(job_id, message="Нарезка по времени…")
+                saved = await loop.run_in_executor(
+                    None,
+                    lambda: split_by_duration(
+                        source_path, clips_dir,
+                        chunk_sec=BOTTOM_CLIP_DURATION,
+                        source_stem=source_stem,
+                    ),
                 )
-        else:
-            from content_factory.core.clip_finder import find_best_clips
-            from content_factory.core.video_cutter import cut_clips
+                for i, p in enumerate(saved, 1):
+                    add_file(
+                        WEB_USER_ID,
+                        f"Часть {i}",
+                        category,
+                        p,
+                        subtype="clip",
+                        parent_id=row["id"],
+                    )
+            else:
+                from content_factory.core.clip_finder import find_best_clips
+                from content_factory.core.video_cutter import cut_clips
 
-            job_store.update(job_id, message="Транскрипция Whisper…")
-            clips_meta = await loop.run_in_executor(None, find_best_clips, source_path)
+                job_store.update(job_id, message="Транскрипция Whisper…")
+                clips_meta = await loop.run_in_executor(None, find_best_clips, source_path)
 
-            job_store.update(job_id, message=f"Найдено {len(clips_meta)} клипов, нарезаю…")
-            saved = await loop.run_in_executor(
-                None,
-                lambda: cut_clips(source_path, clips_meta, clips_dir, source_stem=source_stem),
+                job_store.update(job_id, message=f"Найдено {len(clips_meta)} клипов, нарезаю…")
+                saved = await loop.run_in_executor(
+                    None,
+                    lambda: cut_clips(source_path, clips_meta, clips_dir, source_stem=source_stem),
+                )
+                for i, p in enumerate(saved):
+                    title = clips_meta[i]["title"] if i < len(clips_meta) else p.stem
+                    add_file(
+                        WEB_USER_ID,
+                        title,
+                        category,
+                        p,
+                        subtype="clip",
+                        parent_id=row["id"],
+                    )
+
+            job_store.update(
+                job_id,
+                state="done",
+                message=f"Готово: {len(saved)} клипов",
+                result={"clip_count": len(saved), "source_id": row["id"]},
             )
-            for i, p in enumerate(saved):
-                title = clips_meta[i]["title"] if i < len(clips_meta) else p.stem
-                add_file(
-                    WEB_USER_ID,
-                    title,
-                    category,
-                    p,
-                    subtype="clip",
-                    parent_id=row["id"],
-                )
-
-        job_store.update(
-            job_id,
-            state="done",
-            message=f"Готово: {len(saved)} клипов",
-            result={"clip_count": len(saved), "source_id": row["id"]},
-        )
-    except Exception as exc:
-        job_store.update(job_id, state="error", error=str(exc), message="Ошибка нарезки")
+        except Exception as exc:
+            job_store.update(job_id, state="error", error=str(exc), message="Ошибка нарезки")
 
 
 # ─── Jobs: generate ──────────────────────────────────────────────────────────
@@ -298,42 +303,43 @@ async def _run_generate(
     banner_path: Path,
     banner_animation: str,
 ) -> None:
-    import asyncio as _aio
-    loop = _aio.get_event_loop()
+    loop = asyncio.get_event_loop()
 
-    job_store.update(job_id, state="running", message="Генерация шортса…")
-    work_dir = OUTPUT_DIR / f"web_{job_id}"
-    work_dir.mkdir(parents=True, exist_ok=True)
+    job_store.update(job_id, message="Ожидание очереди…")
+    async with _heavy_sem:
+        job_store.update(job_id, state="running", message="Генерация шортса…")
+        work_dir = OUTPUT_DIR / f"web_{job_id}"
+        work_dir.mkdir(parents=True, exist_ok=True)
 
-    try:
-        from content_factory.core.subtitle_generator import generate_subtitles
-        from content_factory.core.video_composer import compose
+        try:
+            from content_factory.core.subtitle_generator import generate_subtitles
+            from content_factory.core.video_composer import compose
 
-        job_store.update(job_id, message="Генерация субтитров…")
-        ass_path = await loop.run_in_executor(
-            None, generate_subtitles, top_path, work_dir
-        )
+            job_store.update(job_id, message="Генерация субтитров…")
+            ass_path = await loop.run_in_executor(
+                None, generate_subtitles, top_path, work_dir
+            )
 
-        job_store.update(job_id, message="Сборка видео FFmpeg…")
-        output_path = work_dir / "output.mp4"
-        await loop.run_in_executor(
-            None,
-            lambda: compose(
-                top_path, bottom_path, banner_path, ass_path, output_path,
-                banner_animation=banner_animation,
-            ),
-        )
+            job_store.update(job_id, message="Сборка видео FFmpeg…")
+            output_path = work_dir / "output.mp4"
+            await loop.run_in_executor(
+                None,
+                lambda: compose(
+                    top_path, bottom_path, banner_path, ass_path, output_path,
+                    banner_animation=banner_animation,
+                ),
+            )
 
-        mark_used(top_clip_id)
+            mark_used(top_clip_id)
 
-        job_store.update(
-            job_id,
-            state="done",
-            message="Шортс готов!",
-            result={"output_path": str(output_path), "work_dir": str(work_dir)},
-        )
-    except Exception as exc:
-        job_store.update(job_id, state="error", error=str(exc), message="Ошибка генерации")
+            job_store.update(
+                job_id,
+                state="done",
+                message="Шортс готов!",
+                result={"output_path": str(output_path), "work_dir": str(work_dir)},
+            )
+        except Exception as exc:
+            job_store.update(job_id, state="error", error=str(exc), message="Ошибка генерации")
 
 
 # ─── Jobs: list / get ────────────────────────────────────────────────────────

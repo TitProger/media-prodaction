@@ -282,7 +282,7 @@ function renderSource(r) {
         ${'unused_count' in r && r.clip_count > 0 ? `<span class="badge-unused">${r.unused_count} новых</span>` : ''}
       </div>
       <div class="flex gap-2 flex-shrink-0">
-        ${r.clip_count === 0 ? `<button onclick="doCut(${r.id},'${state.cat}')" class="btn btn-primary btn-sm">✂️ Нарезать</button>` : ''}
+        ${r.clip_count === 0 ? `<button onclick="doCut(${r.id},'${state.cat}',this)" class="btn btn-primary btn-sm">✂️ Нарезать</button>` : ''}
         <button onclick="toggleClips(${r.id})" class="btn btn-secondary btn-sm" id="clips-toggle-${r.id}">📋 Клипы</button>
         <button onclick="doDeleteSource(${r.id})" class="btn btn-danger btn-sm">🗑</button>
       </div>
@@ -408,16 +408,19 @@ async function doDeleteBanner(id) {
 }
 
 // ─── Cut ─────────────────────────────────────────────────────────────────────
-async function doCut(sourceId, category) {
+async function doCut(sourceId, category, btnEl) {
+  if (btnEl) { btnEl.disabled = true; btnEl.textContent = '⏳ Запуск…'; }
   try {
-    const job = await api('/ui/api/jobs/cut', {
+    await api('/ui/api/jobs/cut', {
       method: 'POST',
       json: { source_id: sourceId, category },
     });
     toast('Нарезка запущена — смотрите раздел Задачи');
+    startJobPoll();
     showPage('jobs');
   } catch (e) {
     toast('Ошибка: ' + e.message, false);
+    if (btnEl) { btnEl.disabled = false; btnEl.textContent = '✂️ Нарезать'; }
   }
 }
 
@@ -519,6 +522,7 @@ async function doGenerate() {
       json: { top_source_id: topId, bottom_source_id: botId, banner_id: banId, banner_animation: anim },
     });
     toast('Генерация запущена!');
+    startJobPoll();
     showPage('jobs');
   } catch (e) {
     toast('Ошибка: ' + e.message, false);
@@ -532,11 +536,15 @@ async function loadJobs() {
   if (!jobs || jobs.length === 0) {
     el.innerHTML = '<p class="text-gray-500 text-sm text-center py-8">Задач пока нет</p>';
     updateJobsBadge(0);
+    stopJobPoll();
     return;
   }
   el.innerHTML = jobs.map(j => renderJob(j)).join('');
   const running = jobs.filter(j => j.state === 'pending' || j.state === 'running').length;
   updateJobsBadge(running);
+  // stop polling when all jobs are finished
+  if (running === 0) stopJobPoll();
+  else startJobPoll();
 }
 
 function renderJob(j) {
