@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="ru" class="dark">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Content Factory</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  darkMode: 'class',
+  theme: { extend: { colors: { brand: '#f59e0b' } } }
+}
+</script>
+<style>
+  body { background: #030712; color: #f9fafb; }
+  .tab-active { color: #f59e0b; border-color: #f59e0b; }
+  .tab-inactive { color: #6b7280; border-color: transparent; }
+  .card { background: #111827; border: 1px solid #1f2937; border-radius: 0.75rem; }
+  .btn { display:inline-flex;align-items:center;justify-content:center;gap:.35rem;
+         padding:.45rem 1rem;border-radius:.5rem;font-size:.85rem;font-weight:500;
+         cursor:pointer;transition:opacity .15s; }
+  .btn:hover { opacity:.85; }
+  .btn-primary { background:#f59e0b;color:#000; }
+  .btn-secondary { background:#1f2937;color:#e5e7eb;border:1px solid #374151; }
+  .btn-danger { background:#7f1d1d;color:#fca5a5;border:1px solid #991b1b; }
+  .btn-sm { padding:.3rem .7rem;font-size:.78rem; }
+  .input { background:#1f2937;border:1px solid #374151;border-radius:.5rem;
+           padding:.45rem .75rem;font-size:.875rem;color:#f9fafb;width:100%; }
+  .input:focus { outline:none;border-color:#f59e0b; }
+  .tag-source { background:#1e3a5f;color:#93c5fd;border-radius:9999px;padding:.1rem .6rem;font-size:.72rem; }
+  .tag-clip { background:#064e3b;color:#6ee7b7;border-radius:9999px;padding:.1rem .6rem;font-size:.72rem; }
+  .badge-unused { background:#78350f;color:#fcd34d;border-radius:9999px;padding:.1rem .6rem;font-size:.72rem; }
+  .progress-bar { height:4px;background:#f59e0b;border-radius:2px;transition:width .3s; }
+  .drop-zone { border:2px dashed #374151;border-radius:.75rem;padding:2rem;text-align:center;
+               cursor:pointer;transition:border-color .15s,background .15s; }
+  .drop-zone.over { border-color:#f59e0b;background:#1c1405; }
+  .step-dot { width:2rem;height:2rem;border-radius:50%;display:flex;align-items:center;justify-content:center;
+              font-size:.8rem;font-weight:700;transition:background .2s; }
+  .step-dot.done { background:#f59e0b;color:#000; }
+  .step-dot.active { background:#1f2937;border:2px solid #f59e0b;color:#f59e0b; }
+  .step-dot.idle { background:#1f2937;border:2px solid #374151;color:#6b7280; }
+  .job-pending { border-left:3px solid #6b7280; }
+  .job-running { border-left:3px solid #f59e0b; }
+  .job-done { border-left:3px solid #10b981; }
+  .job-error { border-left:3px solid #ef4444; }
+  .spinner { width:1rem;height:1rem;border:2px solid #374151;border-top-color:#f59e0b;
+             border-radius:50%;animation:spin .7s linear infinite;display:inline-block; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .toast { position:fixed;bottom:1.5rem;right:1.5rem;z-index:9999;
+           background:#1f2937;border:1px solid #374151;border-radius:.6rem;
+           padding:.75rem 1.1rem;font-size:.85rem;max-width:320px;
+           box-shadow:0 4px 24px #0006;animation:slideup .25s ease; }
+  @keyframes slideup { from { opacity:0;transform:translateY(1rem); } to { opacity:1;transform:translateY(0); } }
+  ::-webkit-scrollbar { width:5px; height:5px; }
+  ::-webkit-scrollbar-track { background:transparent; }
+  ::-webkit-scrollbar-thumb { background:#374151;border-radius:3px; }
+  @media(max-width:767px) {
+    #sidebar { display:none; }
+    #bottom-nav { display:flex; }
+    #main-content { padding-bottom:5rem; }
+  }
+  @media(min-width:768px) {
+    #sidebar { display:flex; }
+    #bottom-nav { display:none; }
+  }
+</style>
+</head>
+<body class="flex h-screen overflow-hidden">
+
+<!-- ── Sidebar (desktop) ── -->
+<nav id="sidebar" class="w-56 flex-shrink-0 flex-col border-r border-gray-800 p-4 gap-2 overflow-y-auto">
+  <div class="text-brand font-bold text-lg mb-4 px-2">🎬 Content Factory</div>
+  <button onclick="showPage('library')" class="nav-btn w-full text-left px-3 py-2 rounded-lg text-sm font-medium transition-colors" data-page="library">📚 Библиотека</button>
+  <button onclick="showPage('generate')" class="nav-btn w-full text-left px-3 py-2 rounded-lg text-sm font-medium transition-colors" data-page="generate">🚀 Создать</button>
+  <button onclick="showPage('jobs')" class="nav-btn w-full text-left px-3 py-2 rounded-lg text-sm font-medium transition-colors" data-page="jobs">⚙️ Задачи <span id="jobs-badge" class="ml-1 hidden text-xs bg-brand text-black rounded-full px-1.5 py-0.5"></span></button>
+</nav>
+
+<!-- ── Main content ── -->
+<div id="main-content" class="flex-1 overflow-y-auto">
+
+  <!-- Library page -->
+  <div id="page-library" class="page p-4 md:p-6 max-w-4xl mx-auto">
+    <h1 class="text-xl font-bold mb-4">📚 Библиотека</h1>
+
+    <!-- Category tabs -->
+    <div class="flex gap-1 border-b border-gray-800 mb-5 overflow-x-auto">
+      <button onclick="switchCat('top_video')" class="cat-tab tab-inactive border-b-2 px-4 py-2 text-sm font-medium whitespace-nowrap" data-cat="top_video">🎤 Верхние</button>
+      <button onclick="switchCat('bottom_video')" class="cat-tab tab-inactive border-b-2 px-4 py-2 text-sm font-medium whitespace-nowrap" data-cat="bottom_video">🎮 Нижние</button>
+      <button onclick="switchCat('banner_image')" class="cat-tab tab-inactive border-b-2 px-4 py-2 text-sm font-medium whitespace-nowrap" data-cat="banner_image">🖼️ Баннеры (фото)</button>
+      <button onclick="switchCat('banner_video')" class="cat-tab tab-inactive border-b-2 px-4 py-2 text-sm font-medium whitespace-nowrap" data-cat="banner_video">📹 Баннеры (видео)</button>
+    </div>
+
+    <!-- Upload -->
+    <div class="mb-5">
+      <label id="drop-label" class="drop-zone" for="file-input">
+        <input type="file" id="file-input" class="hidden" accept="video/*,image/*" onchange="handleFileSelect(this)"/>
+        <div class="text-3xl mb-2">☁️</div>
+        <div class="text-gray-400 text-sm">Перетащите файл или <span class="text-brand underline">выберите</span></div>
+      </label>
+      <div id="upload-name-row" class="hidden mt-3 flex gap-2">
+        <input type="text" id="upload-name" placeholder="Название файла" class="input flex-1"/>
+        <button onclick="doUpload()" class="btn btn-primary">Загрузить</button>
+        <button onclick="cancelUpload()" class="btn btn-secondary">✕</button>
+      </div>
+      <div id="upload-progress-wrap" class="hidden mt-2">
+        <div class="flex justify-between text-xs text-gray-400 mb-1">
+          <span id="upload-progress-label">Загрузка…</span>
+          <span id="upload-progress-pct">0%</span>
+        </div>
+        <div class="h-1 bg-gray-800 rounded">
+          <div id="upload-progress-bar" class="progress-bar" style="width:0%"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Sources list -->
+    <div id="sources-list" class="space-y-3"></div>
+  </div>
+
+  <!-- Generate page -->
+  <div id="page-generate" class="page hidden p-4 md:p-6 max-w-2xl mx-auto">
+    <h1 class="text-xl font-bold mb-5">🚀 Создать шортс</h1>
+
+    <!-- Step indicator -->
+    <div class="flex items-center gap-2 mb-7">
+      <div class="step-dot" id="sdot-0">1</div><div class="h-px flex-1 bg-gray-700"></div>
+      <div class="step-dot" id="sdot-1">2</div><div class="h-px flex-1 bg-gray-700"></div>
+      <div class="step-dot" id="sdot-2">3</div><div class="h-px flex-1 bg-gray-700"></div>
+      <div class="step-dot" id="sdot-3">4</div>
+    </div>
+
+    <div id="gen-step-0">
+      <p class="text-gray-400 text-sm mb-3">Шаг 1 — Выберите источник <strong>верхнего</strong> видео (с речью)</p>
+      <div id="gen-top-list" class="space-y-2"></div>
+    </div>
+
+    <div id="gen-step-1" class="hidden">
+      <p class="text-gray-400 text-sm mb-3">Шаг 2 — Выберите источник <strong>нижнего</strong> видео (фон/геймплей)</p>
+      <div id="gen-bot-list" class="space-y-2"></div>
+      <button onclick="genBack(0)" class="btn btn-secondary mt-4">← Назад</button>
+    </div>
+
+    <div id="gen-step-2" class="hidden">
+      <p class="text-gray-400 text-sm mb-3">Шаг 3 — Выберите баннер</p>
+      <div id="gen-ban-list" class="space-y-2"></div>
+      <button onclick="genBack(1)" class="btn btn-secondary mt-4">← Назад</button>
+    </div>
+
+    <div id="gen-step-3" class="hidden">
+      <p class="text-gray-400 text-sm mb-3">Шаг 4 — Выберите анимацию баннера и запустите</p>
+      <div class="card p-4 mb-4 space-y-3 text-sm text-gray-300">
+        <div><span class="text-gray-500">Верхнее:</span> <span id="confirm-top" class="text-white"></span></div>
+        <div><span class="text-gray-500">Нижнее:</span> <span id="confirm-bot" class="text-white"></span></div>
+        <div><span class="text-gray-500">Баннер:</span> <span id="confirm-ban" class="text-white"></span></div>
+      </div>
+      <div class="mb-4">
+        <p class="text-xs text-gray-500 mb-2">Анимация баннера:</p>
+        <div class="flex gap-2 flex-wrap">
+          <button onclick="setAnim('slide_left')" class="anim-btn btn btn-secondary" data-anim="slide_left">◀️ Слева</button>
+          <button onclick="setAnim('slide_right')" class="anim-btn btn btn-secondary" data-anim="slide_right">▶️ Справа</button>
+          <button onclick="setAnim('fade')" class="anim-btn btn btn-secondary" data-anim="fade">✨ Фейд</button>
+        </div>
+      </div>
+      <div class="flex gap-3">
+        <button onclick="genBack(2)" class="btn btn-secondary">← Назад</button>
+        <button onclick="doGenerate()" class="btn btn-primary flex-1">🚀 Сгенерировать</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Jobs page -->
+  <div id="page-jobs" class="page hidden p-4 md:p-6 max-w-3xl mx-auto">
+    <div class="flex items-center justify-between mb-4">
+      <h1 class="text-xl font-bold">⚙️ Задачи</h1>
+      <button onclick="loadJobs()" class="btn btn-secondary btn-sm">↻ Обновить</button>
+    </div>
+    <div id="jobs-list" class="space-y-3"></div>
+  </div>
+
+</div>
+
+<!-- ── Bottom nav (mobile) ── -->
+<nav id="bottom-nav" class="fixed bottom-0 left-0 right-0 border-t border-gray-800 bg-gray-950 flex justify-around py-2 z-50">
+  <button onclick="showPage('library')" class="mob-nav flex flex-col items-center gap-0.5 text-xs px-4 py-1" data-page="library">
+    <span class="text-xl">📚</span><span>Библиотека</span>
+  </button>
+  <button onclick="showPage('generate')" class="mob-nav flex flex-col items-center gap-0.5 text-xs px-4 py-1" data-page="generate">
+    <span class="text-xl">🚀</span><span>Создать</span>
+  </button>
+  <button onclick="showPage('jobs')" class="mob-nav flex flex-col items-center gap-0.5 text-xs px-4 py-1" data-page="jobs">
+    <span class="text-xl">⚙️</span><span>Задачи</span>
+  </button>
+</nav>
+
+<!-- Toast -->
+<div id="toast" class="toast hidden"></div>
+
+<script>
+// ─── State ────────────────────────────────────────────────────────────────────
+const state = {
+  cat: 'top_video',
+  pendingFile: null,
+  gen: { step: 0, topId: null, topName: '', botId: null, botName: '', banId: null, banName: '', anim: 'slide_left' },
+};
+
+let jobPollTimer = null;
+
+// ─── Navigation ──────────────────────────────────────────────────────────────
+function showPage(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.add('hidden'));
+  document.getElementById('page-' + name).classList.remove('hidden');
+
+  document.querySelectorAll('.nav-btn').forEach(b => {
+    b.classList.toggle('bg-gray-800', b.dataset.page === name);
+    b.classList.toggle('text-brand', b.dataset.page === name);
+    b.classList.toggle('text-gray-400', b.dataset.page !== name);
+  });
+  document.querySelectorAll('.mob-nav').forEach(b => {
+    b.classList.toggle('text-brand', b.dataset.page === name);
+    b.classList.toggle('text-gray-500', b.dataset.page !== name);
+  });
+
+  if (name === 'library') loadSources();
+  if (name === 'generate') initGenerate();
+  if (name === 'jobs') { loadJobs(); startJobPoll(); }
+  else stopJobPoll();
+}
+
+// ─── Toast ────────────────────────────────────────────────────────────────────
+function toast(msg, ok = true) {
+  const el = document.getElementById('toast');
+  el.textContent = (ok ? '✅ ' : '❌ ') + msg;
+  el.classList.remove('hidden');
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.add('hidden'), 3500);
+}
+
+// ─── Library ──────────────────────────────────────────────────────────────────
+function switchCat(cat) {
+  state.cat = cat;
+  document.querySelectorAll('.cat-tab').forEach(t => {
+    const active = t.dataset.cat === cat;
+    t.classList.toggle('tab-active', active);
+    t.classList.toggle('tab-inactive', !active);
+  });
+  // reset upload
+  cancelUpload();
+  // update file input accept
+  const isImg = cat === 'banner_image';
+  document.getElementById('file-input').accept = isImg ? 'image/*' : 'video/*,image/*';
+  loadSources();
+}
+
+async function loadSources() {
+  const cat = state.cat;
+  const isBanner = cat.startsWith('banner');
+  let rows;
+  if (isBanner) {
+    rows = await api('/ui/api/banners');
+    rows = rows.filter(r => r.category === cat);
+  } else {
+    rows = await api(`/ui/api/sources/${cat}`);
+  }
+  const el = document.getElementById('sources-list');
+  el.innerHTML = '';
+  if (!rows || rows.length === 0) {
+    el.innerHTML = '<p class="text-gray-500 text-sm text-center py-8">Нет файлов. Загрузите первый.</p>';
+    return;
+  }
+  rows.forEach(r => el.appendChild(isBanner ? renderBanner(r) : renderSource(r)));
+}
+
+function renderSource(r) {
+  const div = document.createElement('div');
+  div.className = 'card p-3';
+  div.innerHTML = `
+    <div class="flex items-center justify-between gap-2 flex-wrap">
+      <div class="flex items-center gap-2 min-w-0">
+        <span class="tag-source">источник</span>
+        <span class="font-medium text-sm truncate">${esc(r.name)}</span>
+        ${r.clip_count > 0 ? `<span class="tag-clip">${r.clip_count} клипов</span>` : ''}
+        ${'unused_count' in r && r.clip_count > 0 ? `<span class="badge-unused">${r.unused_count} новых</span>` : ''}
+      </div>
+      <div class="flex gap-2 flex-shrink-0">
+        ${r.clip_count === 0 ? `<button onclick="doCut(${r.id},'${state.cat}')" class="btn btn-primary btn-sm">✂️ Нарезать</button>` : ''}
+        <button onclick="toggleClips(${r.id})" class="btn btn-secondary btn-sm" id="clips-toggle-${r.id}">📋 Клипы</button>
+        <button onclick="doDeleteSource(${r.id})" class="btn btn-danger btn-sm">🗑</button>
+      </div>
+    </div>
+    <div id="clips-${r.id}" class="hidden mt-3 space-y-1 pl-2 border-l border-gray-700"></div>
+  `;
+  return div;
+}
+
+function renderBanner(r) {
+  const div = document.createElement('div');
+  div.className = 'card p-3 flex items-center justify-between gap-2';
+  const type = r.category === 'banner_video' ? '📹' : '🖼️';
+  div.innerHTML = `
+    <span class="font-medium text-sm truncate">${type} ${esc(r.name)}</span>
+    <button onclick="doDeleteBanner(${r.id})" class="btn btn-danger btn-sm">🗑</button>
+  `;
+  return div;
+}
+
+async function toggleClips(sourceId) {
+  const el = document.getElementById(`clips-${sourceId}`);
+  if (!el.classList.contains('hidden')) { el.classList.add('hidden'); return; }
+  el.classList.remove('hidden');
+  el.innerHTML = '<div class="spinner"></div>';
+  const clips = await api(`/ui/api/sources/${sourceId}/clips`);
+  if (!clips || clips.length === 0) {
+    el.innerHTML = '<p class="text-gray-500 text-xs">Клипов ещё нет</p>';
+    return;
+  }
+  el.innerHTML = clips.map(c => `
+    <div class="flex items-center justify-between gap-2 py-1">
+      <span class="text-xs text-gray-300 truncate">${c.used ? '✅' : '⬜'} ${esc(c.name)}</span>
+      <button onclick="doDeleteClip(${c.id},${sourceId})" class="btn btn-danger btn-sm" style="padding:.2rem .5rem">🗑</button>
+    </div>
+  `).join('');
+}
+
+// ─── Upload ───────────────────────────────────────────────────────────────────
+const dropLabel = document.getElementById('drop-label');
+dropLabel.addEventListener('dragover', e => { e.preventDefault(); dropLabel.classList.add('over'); });
+dropLabel.addEventListener('dragleave', () => dropLabel.classList.remove('over'));
+dropLabel.addEventListener('drop', e => {
+  e.preventDefault();
+  dropLabel.classList.remove('over');
+  const f = e.dataTransfer.files[0];
+  if (f) prepareUpload(f);
+});
+
+function handleFileSelect(input) {
+  if (input.files[0]) prepareUpload(input.files[0]);
+}
+
+function prepareUpload(file) {
+  state.pendingFile = file;
+  const nameEl = document.getElementById('upload-name');
+  nameEl.value = file.name.replace(/\.[^.]+$/, '');
+  document.getElementById('upload-name-row').classList.remove('hidden');
+}
+
+function cancelUpload() {
+  state.pendingFile = null;
+  document.getElementById('upload-name-row').classList.add('hidden');
+  document.getElementById('upload-progress-wrap').classList.add('hidden');
+  document.getElementById('file-input').value = '';
+}
+
+async function doUpload() {
+  if (!state.pendingFile) return;
+  const name = document.getElementById('upload-name').value.trim() || state.pendingFile.name;
+  const form = new FormData();
+  form.append('name', name);
+  form.append('file', state.pendingFile);
+
+  document.getElementById('upload-progress-wrap').classList.remove('hidden');
+  document.getElementById('upload-name-row').classList.add('hidden');
+
+  try {
+    await new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `/ui/api/upload/${state.cat}`);
+      xhr.upload.onprogress = e => {
+        if (e.lengthComputable) {
+          const pct = Math.round(e.loaded / e.total * 100);
+          document.getElementById('upload-progress-bar').style.width = pct + '%';
+          document.getElementById('upload-progress-pct').textContent = pct + '%';
+        }
+      };
+      xhr.onload = () => xhr.status < 300 ? resolve(JSON.parse(xhr.responseText)) : reject(new Error(xhr.responseText));
+      xhr.onerror = () => reject(new Error('Network error'));
+      xhr.send(form);
+    });
+    toast('Файл загружен');
+    cancelUpload();
+    loadSources();
+  } catch (e) {
+    toast('Ошибка загрузки: ' + e.message, false);
+    document.getElementById('upload-progress-wrap').classList.add('hidden');
+  }
+}
+
+// ─── Delete ───────────────────────────────────────────────────────────────────
+async function doDeleteSource(id) {
+  if (!confirm('Удалить источник и все его клипы?')) return;
+  await api(`/ui/api/sources/${id}`, { method: 'DELETE' });
+  toast('Удалено');
+  loadSources();
+}
+
+async function doDeleteClip(id, sourceId) {
+  if (!confirm('Удалить клип?')) return;
+  await api(`/ui/api/clips/${id}`, { method: 'DELETE' });
+  toast('Клип удалён');
+  toggleClips(sourceId); // close
+  setTimeout(() => toggleClips(sourceId), 100); // reopen refreshed
+}
+
+async function doDeleteBanner(id) {
+  if (!confirm('Удалить баннер?')) return;
+  await api(`/ui/api/banners/${id}`, { method: 'DELETE' });
+  toast('Баннер удалён');
+  loadSources();
+}
+
+// ─── Cut ─────────────────────────────────────────────────────────────────────
+async function doCut(sourceId, category) {
+  try {
+    const job = await api('/ui/api/jobs/cut', {
+      method: 'POST',
+      json: { source_id: sourceId, category },
+    });
+    toast('Нарезка запущена — смотрите раздел Задачи');
+    showPage('jobs');
+  } catch (e) {
+    toast('Ошибка: ' + e.message, false);
+  }
+}
+
+// ─── Generate wizard ──────────────────────────────────────────────────────────
+async function initGenerate() {
+  state.gen = { step: 0, topId: null, topName: '', botId: null, botName: '', banId: null, banName: '', anim: 'slide_left' };
+  setAnim('slide_left');
+  goGenStep(0);
+  await loadGenTop();
+}
+
+async function loadGenTop() {
+  const rows = await api('/ui/api/sources/top_video');
+  const el = document.getElementById('gen-top-list');
+  el.innerHTML = '';
+  if (!rows || rows.length === 0) {
+    el.innerHTML = '<p class="text-gray-500 text-sm">Нет источников верхних видео. Сначала загрузите и нарежьте их.</p>';
+    return;
+  }
+  rows.forEach(r => {
+    if (!r.clip_count) return;
+    const btn = document.createElement('button');
+    btn.className = 'card w-full p-3 flex items-center justify-between hover:border-brand transition-colors text-left';
+    btn.innerHTML = `
+      <span class="font-medium text-sm">${esc(r.name)}</span>
+      <span class="badge-unused text-xs">${r.unused_count || 0} новых</span>
+    `;
+    btn.onclick = () => { state.gen.topId = r.id; state.gen.topName = r.name; goGenStep(1); loadGenBot(); };
+    el.appendChild(btn);
+  });
+  if (!el.children.length) el.innerHTML = '<p class="text-gray-500 text-sm">Нет нарезанных источников. Нарежьте видео в разделе Библиотека.</p>';
+}
+
+async function loadGenBot() {
+  const rows = await api('/ui/api/sources/bottom_video');
+  const el = document.getElementById('gen-bot-list');
+  el.innerHTML = '';
+  if (!rows || rows.length === 0) {
+    el.innerHTML = '<p class="text-gray-500 text-sm">Нет источников нижних видео.</p>';
+    return;
+  }
+  rows.forEach(r => {
+    if (!r.clip_count) return;
+    const btn = document.createElement('button');
+    btn.className = 'card w-full p-3 flex items-center justify-between hover:border-brand transition-colors text-left';
+    btn.innerHTML = `<span class="font-medium text-sm">${esc(r.name)}</span><span class="tag-clip">${r.clip_count} клипов</span>`;
+    btn.onclick = () => { state.gen.botId = r.id; state.gen.botName = r.name; goGenStep(2); loadGenBan(); };
+    el.appendChild(btn);
+  });
+  if (!el.children.length) el.innerHTML = '<p class="text-gray-500 text-sm">Нет нарезанных нижних видео.</p>';
+}
+
+async function loadGenBan() {
+  const rows = await api('/ui/api/banners');
+  const el = document.getElementById('gen-ban-list');
+  el.innerHTML = '';
+  rows.forEach(r => {
+    const btn = document.createElement('button');
+    btn.className = 'card w-full p-3 text-left hover:border-brand transition-colors text-sm';
+    btn.textContent = (r.category === 'banner_video' ? '📹 ' : '🖼️ ') + r.name;
+    btn.onclick = () => { state.gen.banId = r.id; state.gen.banName = r.name; goGenStep(3); updateConfirm(); };
+    el.appendChild(btn);
+  });
+  if (!el.children.length) el.innerHTML = '<p class="text-gray-500 text-sm">Нет баннеров.</p>';
+}
+
+function goGenStep(n) {
+  for (let i = 0; i <= 3; i++) {
+    const el = document.getElementById('gen-step-' + i);
+    el.classList.toggle('hidden', i !== n);
+    const dot = document.getElementById('sdot-' + i);
+    dot.className = 'step-dot ' + (i < n ? 'done' : i === n ? 'active' : 'idle');
+  }
+  state.gen.step = n;
+}
+
+function genBack(n) { goGenStep(n); }
+
+function setAnim(a) {
+  state.gen.anim = a;
+  document.querySelectorAll('.anim-btn').forEach(b => {
+    b.classList.toggle('btn-primary', b.dataset.anim === a);
+    b.classList.toggle('btn-secondary', b.dataset.anim !== a);
+  });
+}
+
+function updateConfirm() {
+  document.getElementById('confirm-top').textContent = state.gen.topName;
+  document.getElementById('confirm-bot').textContent = state.gen.botName;
+  document.getElementById('confirm-ban').textContent = state.gen.banName;
+}
+
+async function doGenerate() {
+  const { topId, botId, banId, anim } = state.gen;
+  if (!topId || !botId || !banId) { toast('Выберите все источники', false); return; }
+  try {
+    const job = await api('/ui/api/jobs/generate', {
+      method: 'POST',
+      json: { top_source_id: topId, bottom_source_id: botId, banner_id: banId, banner_animation: anim },
+    });
+    toast('Генерация запущена!');
+    showPage('jobs');
+  } catch (e) {
+    toast('Ошибка: ' + e.message, false);
+  }
+}
+
+// ─── Jobs ─────────────────────────────────────────────────────────────────────
+async function loadJobs() {
+  const jobs = await api('/ui/api/jobs');
+  const el = document.getElementById('jobs-list');
+  if (!jobs || jobs.length === 0) {
+    el.innerHTML = '<p class="text-gray-500 text-sm text-center py-8">Задач пока нет</p>';
+    updateJobsBadge(0);
+    return;
+  }
+  el.innerHTML = jobs.map(j => renderJob(j)).join('');
+  const running = jobs.filter(j => j.state === 'pending' || j.state === 'running').length;
+  updateJobsBadge(running);
+}
+
+function renderJob(j) {
+  const icons = { pending: '🕐', running: '<span class="spinner"></span>', done: '✅', error: '❌' };
+  const dl = j.state === 'done' && j.type === 'generate'
+    ? `<a href="/ui/api/download/${j.id}" download="short_${j.id}.mp4" class="btn btn-primary btn-sm">⬇️ Скачать</a>` : '';
+  return `
+    <div class="card p-4 job-${j.state}">
+      <div class="flex items-center justify-between gap-3 flex-wrap">
+        <div class="flex items-center gap-2 text-sm">
+          ${icons[j.state]}
+          <span class="font-medium">${j.type === 'cut' ? '✂️ Нарезка' : '🎬 Генерация'}</span>
+          <span class="text-gray-400 text-xs">#${j.id}</span>
+        </div>
+        ${dl}
+      </div>
+      <p class="text-gray-400 text-xs mt-2">${esc(j.message || '')}</p>
+      ${j.error ? `<p class="text-red-400 text-xs mt-1">${esc(j.error)}</p>` : ''}
+    </div>
+  `;
+}
+
+function updateJobsBadge(n) {
+  const b = document.getElementById('jobs-badge');
+  b.textContent = n;
+  b.classList.toggle('hidden', n === 0);
+}
+
+function startJobPoll() {
+  if (jobPollTimer) return;
+  jobPollTimer = setInterval(loadJobs, 2500);
+}
+
+function stopJobPoll() {
+  clearInterval(jobPollTimer);
+  jobPollTimer = null;
+}
+
+// ─── API helper ──────────────────────────────────────────────────────────────
+async function api(url, opts = {}) {
+  const init = { method: opts.method || 'GET' };
+  if (opts.json) {
+    init.body = JSON.stringify(opts.json);
+    init.headers = { 'Content-Type': 'application/json' };
+  }
+  const res = await fetch(url, init);
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '');
+    throw new Error(`${res.status} ${txt.slice(0, 200)}`);
+  }
+  return res.json().catch(() => null);
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ─── Init ────────────────────────────────────────────────────────────────────
+showPage('library');
+switchCat('top_video');
+</script>
+</body>
+</html>

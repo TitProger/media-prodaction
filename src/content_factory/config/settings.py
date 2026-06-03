@@ -90,6 +90,11 @@ BOTTOM_CLIP_DURATION = float(os.environ.get("BOTTOM_CLIP_DURATION", "60"))  # se
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 
 # ---------------------------------------------------------------------------
+# Web UI — single fixed user (no auth)
+# ---------------------------------------------------------------------------
+WEB_USER_ID = int(os.environ.get("WEB_USER_ID", "1"))
+
+# ---------------------------------------------------------------------------
 # Banner overlay
 # ---------------------------------------------------------------------------
 BANNER_APPEAR_AT_SEC  = 3.0   # when the banner first appears

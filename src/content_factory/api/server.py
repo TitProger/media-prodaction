@@ -19,6 +19,7 @@ from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Path, U
 from fastapi.openapi.utils import get_openapi
 from pydantic import BaseModel, Field
 
+from content_factory.api.web_routes import router as web_router
 from content_factory.config.settings import API_SECRET_KEY
 from content_factory.db.library import (
     CATEGORIES,
@@ -265,3 +266,6 @@ def _custom_openapi() -> dict:
 
 
 app.openapi = _custom_openapi  # type: ignore[method-assign]
+
+# ─── Web UI router (no auth, single-user) ────────────────────────────────────
+app.include_router(web_router)
