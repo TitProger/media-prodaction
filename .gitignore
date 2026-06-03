@@ -4,6 +4,9 @@
 # Generated output (videos, subtitles)
 output/
 
+# Media library & database (large files, user data — never commit)
+storage/
+
 # Python
 __pycache__/
 *.py[cod]
