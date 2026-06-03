@@ -40,10 +40,27 @@ def _launch_ui(host: str, port: int, share: bool) -> None:
     demo.launch(server_name=host, server_port=port, share=share)
 
 
-def _launch_bot() -> None:
+def _launch_bot(notify_chat_id: int | None = None) -> None:
     from content_factory.bot.bot import run_bot
 
-    run_bot()
+    run_bot(notify_chat_id=notify_chat_id)
+
+
+def _auth_youtube() -> None:
+    """One-time OAuth browser flow to authorise YouTube uploads."""
+    from content_factory.config.settings import YOUTUBE_CLIENT_SECRET, YOUTUBE_TOKEN_FILE
+    from content_factory.core.youtube_uploader import authenticate
+
+    if not YOUTUBE_CLIENT_SECRET:
+        print(
+            "❌  YOUTUBE_CLIENT_SECRET is not set in .env\n"
+            "    Download client_secret_*.json from Google Cloud Console\n"
+            "    and set YOUTUBE_CLIENT_SECRET=/path/to/that/file.json"
+        )
+        return
+    print(f"🌐  Opening browser for Google OAuth…\n    Token will be saved to: {YOUTUBE_TOKEN_FILE}")
+    authenticate(YOUTUBE_CLIENT_SECRET, YOUTUBE_TOKEN_FILE)
+    print("✅  YouTube authorisation complete!")
 
 
 def _launch_api(host: str, port: int) -> None:
@@ -53,7 +70,7 @@ def _launch_api(host: str, port: int) -> None:
     uvicorn.run(app, host=host, port=port)
 
 
-def _launch_all(api_host: str, api_port: int) -> None:
+def _launch_all(api_host: str, api_port: int, notify_chat_id: int | None = None) -> None:
     """Run FastAPI (background thread) + Telegram bot (main thread) together."""
     import threading
     import uvicorn
@@ -68,7 +85,7 @@ def _launch_all(api_host: str, api_port: int) -> None:
     api_thread.start()
     logging.info("API server → http://%s:%s  |  Swagger → http://%s:%s/docs", api_host, api_port, api_host, api_port)
 
-    run_bot()  # blocks until CTRL+C; daemon thread dies with it
+    run_bot(notify_chat_id=notify_chat_id)  # blocks until CTRL+C; daemon thread dies with it
 
 
 def _cli_compose(args: argparse.Namespace) -> None:
@@ -113,6 +130,13 @@ def main() -> None:
     all_parser = subparsers.add_parser("start", help="Launch Telegram bot + FastAPI server together")
     all_parser.add_argument("--api-host", default="0.0.0.0")
     all_parser.add_argument("--api-port", type=int, default=8001)
+    all_parser.add_argument(
+        "--notify-chat-id", type=int, default=None,
+        help="Telegram chat_id to send cron job results to (optional)",
+    )
+
+    # --- YouTube auth sub-command ---
+    subparsers.add_parser("auth-youtube", help="One-time OAuth login for YouTube auto-upload")
 
     # --- CLI sub-command ---
     cli_parser = subparsers.add_parser("compose", help="Run pipeline from CLI (no UI)")
@@ -129,8 +153,10 @@ def main() -> None:
         _launch_bot()
     elif args.command == "api":
         _launch_api(args.host, args.port)
+    elif args.command == "auth-youtube":
+        _auth_youtube()
     elif args.command == "start":
-        _launch_all(args.api_host, args.api_port)
+        _launch_all(args.api_host, args.api_port, notify_chat_id=args.notify_chat_id)
     else:
         # Default: launch UI (even if no sub-command given)
         host = getattr(args, "host", "127.0.0.1")

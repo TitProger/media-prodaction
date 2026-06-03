@@ -19,6 +19,9 @@ dependencies = [
     "python-multipart>=0.0.9",
     "anthropic>=0.36",
     "google-genai>=1.0",
+    "google-api-python-client>=2.100",
+    "google-auth-oauthlib>=1.0",
+    "google-auth-httplib2>=0.1",
 ]
 
 [project.optional-dependencies]

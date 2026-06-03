@@ -1174,7 +1174,7 @@ async def _on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 # ─── App builder ──────────────────────────────────────────────────────────────
 
-def build_bot() -> Application:
+def build_bot(notify_chat_id: int | None = None) -> Application:
     init_db()
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
@@ -1211,13 +1211,18 @@ def build_bot() -> Application:
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, on_message))
 
     app.add_error_handler(_on_error)
+
+    # ── Auto-upload cron (optional, requires YOUTUBE_CLIENT_SECRET in .env) ──
+    from content_factory.scheduler.auto_generate import register as _register_cron
+    _register_cron(app, notify_chat_id=notify_chat_id)
+
     return app
 
 
-def run_bot() -> None:
+def run_bot(notify_chat_id: int | None = None) -> None:
     import os
     logger.info("Starting Content Factory bot… (PID=%s)", os.getpid())
-    app = build_bot()
+    app = build_bot(notify_chat_id=notify_chat_id)
     app.run_polling(
         drop_pending_updates=False,  # keep callbacks pressed during restart
         allowed_updates=Update.ALL_TYPES,  # explicitly receive ALL update types

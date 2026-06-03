@@ -95,11 +95,31 @@ TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 WEB_USER_ID = int(os.environ.get("WEB_USER_ID", "1"))
 
 # ---------------------------------------------------------------------------
+# YouTube auto-upload (cron)
+# ---------------------------------------------------------------------------
+# Path to client_secret_*.json downloaded from Google Cloud Console.
+# Leave empty to disable YouTube auto-upload.
+YOUTUBE_CLIENT_SECRET  = os.environ.get("YOUTUBE_CLIENT_SECRET", "")
+# Where to cache the OAuth token after first login (never commit this file!)
+YOUTUBE_TOKEN_FILE     = os.environ.get(
+    "YOUTUBE_TOKEN_FILE",
+    str(STORAGE_DIR / "youtube_token.json"),
+)
+# How often to auto-generate+upload a Short (hours). 0 = disabled.
+YOUTUBE_CRON_INTERVAL_HOURS = float(os.environ.get("YOUTUBE_CRON_INTERVAL_HOURS", "6"))
+# Privacy of uploaded videos: private | unlisted | public
+YOUTUBE_PRIVACY_STATUS = os.environ.get("YOUTUBE_PRIVACY_STATUS", "private")
+# Comma-separated tags added to every upload
+YOUTUBE_TAGS           = os.environ.get("YOUTUBE_TAGS", "shorts")
+# Description added to every upload (can be multiline via \n in .env)
+YOUTUBE_DESCRIPTION    = os.environ.get("YOUTUBE_DESCRIPTION", "#Shorts")
+
+# ---------------------------------------------------------------------------
 # Banner overlay
 # ---------------------------------------------------------------------------
-BANNER_APPEAR_AT_SEC  = 3.0   # when the banner first appears
-BANNER_DURATION_SEC   = 5.0   # used only in "fade" mode (how long it stays)
-BANNER_FADE_SEC       = 0.4   # slide / fade transition duration (seconds)
+BANNER_APPEAR_AT_SEC  = 3.0    # when the banner first appears
+BANNER_DURATION_SEC   = 300.0  # fade mode: how long banner stays (300s >> any short)
+BANNER_FADE_SEC       = 0.4    # slide / fade transition duration (seconds)
 BANNER_MARGIN_TOP     = OUTPUT_HEIGHT // 2 + 40   # 1000 px — just below subtitle split line
 BANNER_MARGIN_LEFT    = 20    # px from the left (and right) edge
 
