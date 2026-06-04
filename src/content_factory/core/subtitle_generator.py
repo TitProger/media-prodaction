@@ -113,14 +113,19 @@ def _build_events(segments: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def generate_subtitles(video_path: str | Path, output_dir: str | Path) -> Path:
+def generate_subtitles(
+    video_path: str | Path,
+    output_dir: str | Path,
+    model_name: str | None = None,
+    margin_v: int | None = None,
+) -> Path:
     video_path = Path(video_path)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     ass_path = output_dir / f"{video_path.stem}_subtitles.ass"
 
-    model = _get_model(WHISPER_MODEL)
+    model = _get_model(model_name or WHISPER_MODEL)
 
     logger.info("Transcribing '%s'…", video_path)
     result = model.transcribe(
@@ -142,7 +147,7 @@ def generate_subtitles(video_path: str | Path, output_dir: str | Path) -> Path:
         outline_px=SUBTITLE_OUTLINE,
         shadow=SUBTITLE_SHADOW,
         alignment=SUBTITLE_ALIGNMENT,
-        margin_v=SUBTITLE_MARGIN_V,
+        margin_v=margin_v if margin_v is not None else SUBTITLE_MARGIN_V,
     )
 
     ass_path.write_text(header + _build_events(result["segments"]), encoding="utf-8")

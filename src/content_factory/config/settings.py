@@ -6,6 +6,13 @@ All tuneable parameters live here — never hardcode values in core modules.
 import os
 from pathlib import Path
 
+# Load .env file if present
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
@@ -22,6 +29,7 @@ OUTPUT_HEIGHT = 1920
 OUTPUT_FPS = 30
 OUTPUT_CRF = 26          # quality: lower = better (23-28 is good for Shorts/Reels)
 OUTPUT_PRESET = "fast"   # ffmpeg preset: ultrafast/fast/medium/slow
+FFMPEG_TIMEOUT = int(os.environ.get("FFMPEG_TIMEOUT", "1800"))  # seconds, default 30 min
 
 # ---------------------------------------------------------------------------
 # Split-screen layout
@@ -71,13 +79,21 @@ GEMINI_API_KEY  = os.environ.get("GEMINI_API_KEY", "")
 GEMINI_MODEL    = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash-lite")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 CLAUDE_MODEL    = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")
+OPENAI_API_KEY  = os.environ.get("OPENAI_API_KEY", "")
+OPENAI_MODEL    = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+GROQ_API_KEY    = os.environ.get("GROQ_API_KEY", "")
+GROQ_MODEL      = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
 
 # ---------------------------------------------------------------------------
-# Clip-finding parameters  (top_video — AI-powered)
+# Clip-finding parameters  (top_video / blog_video — AI-powered)
 # ---------------------------------------------------------------------------
 CLIP_COUNT        = int(os.environ.get("CLIP_COUNT", "10"))   # target clips per video
 CLIP_MIN_DURATION = float(os.environ.get("CLIP_MIN_DURATION", "15"))  # seconds
 CLIP_MAX_DURATION = float(os.environ.get("CLIP_MAX_DURATION", "60"))  # seconds
+
+# Blog-video clip params — viral short-form style, 30–60 s
+BLOG_CLIP_MIN_DURATION = float(os.environ.get("BLOG_CLIP_MIN_DURATION", "30"))  # seconds
+BLOG_CLIP_MAX_DURATION = float(os.environ.get("BLOG_CLIP_MAX_DURATION", "60"))  # seconds
 
 # ---------------------------------------------------------------------------
 # Bottom-video split  (bottom_video — simple time-based)
@@ -134,3 +150,21 @@ BANNER_ANIMATION      = os.environ.get("BANNER_ANIMATION", "slide_left")
 
 # How many seconds one full slide cycle lasts (in + stay + out)
 BANNER_LOOP_INTERVAL  = float(os.environ.get("BANNER_LOOP_INTERVAL", "7.0"))
+
+# ---------------------------------------------------------------------------
+# Single-video shorts (blog / vlog mode — one video, full 1080x1920)
+# ---------------------------------------------------------------------------
+# Subtitle position for single-video mode (MarginV in ASS, px from bottom)
+SINGLE_SUBTITLE_MARGIN_V = int(os.environ.get("SINGLE_SUBTITLE_MARGIN_V", str(OUTPUT_HEIGHT // 2 - 60)))
+# Banner position — lower third of the screen
+SINGLE_BANNER_MARGIN_TOP  = int(os.environ.get("SINGLE_BANNER_MARGIN_TOP", str(int(OUTPUT_HEIGHT * 0.72))))
+
+# ---------------------------------------------------------------------------
+# Video color correction (applied in single-video mode and optionally in split)
+# FFmpeg eq filter: brightness (-1..1), contrast (0..2), saturation (0..3)
+# ---------------------------------------------------------------------------
+VIDEO_EQ_BRIGHTNESS = float(os.environ.get("VIDEO_EQ_BRIGHTNESS", "-0.06"))
+VIDEO_EQ_CONTRAST   = float(os.environ.get("VIDEO_EQ_CONTRAST",   "1.08"))
+VIDEO_EQ_SATURATION = float(os.environ.get("VIDEO_EQ_SATURATION", "1.10"))
+# Apply color correction in split-screen mode too (default: false)
+SPLIT_EQ_ENABLED    = os.environ.get("SPLIT_EQ_ENABLED", "false").lower() == "true"

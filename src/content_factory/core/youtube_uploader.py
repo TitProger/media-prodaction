@@ -96,6 +96,12 @@ def upload_video(
     from googleapiclient.discovery import build
     from googleapiclient.http import MediaFileUpload
 
+    video_path = Path(video_path)
+    size_mb = video_path.stat().st_size / 1024 / 1024
+    logger.info("[youtube] File size: %.1f MB", size_mb)
+    if size_mb > 128_000:  # YouTube allows up to 128 GB, but warn at 10 GB
+        logger.warning("[youtube] Large file: %.1f MB — upload may be slow", size_mb)
+
     creds   = _get_credentials(client_secret_path, token_path)
     youtube = build("youtube", "v3", credentials=creds)
 

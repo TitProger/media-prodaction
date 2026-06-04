@@ -212,12 +212,14 @@ async def _run_cut(job_id: str, row, category: str) -> None:
                         subtype="clip",
                         parent_id=row["id"],
                     )
-            else:
+            elif category in ("top_video", "blog_video"):
                 from content_factory.core.clip_finder import find_best_clips
                 from content_factory.core.video_cutter import cut_clips
 
                 job_store.update(job_id, message="Транскрипция Whisper…")
-                clips_meta = await loop.run_in_executor(None, find_best_clips, source_path)
+                clips_meta = await loop.run_in_executor(
+                    None, lambda: find_best_clips(source_path, category=category)
+                )
 
                 job_store.update(job_id, message=f"Найдено {len(clips_meta)} клипов, нарезаю…")
                 saved = await loop.run_in_executor(
@@ -376,7 +378,7 @@ async def api_download(job_id: str) -> FileResponse:
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
-_VALID_CATEGORIES = {"top_video", "bottom_video", "banner_image", "banner_video"}
+_VALID_CATEGORIES = {"top_video", "bottom_video", "blog_video", "banner_image", "banner_video"}
 
 
 def _valid_category(cat: str) -> None:

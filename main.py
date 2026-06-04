@@ -34,8 +34,8 @@ logging.getLogger("httpx").addFilter(_SuppressGetUpdates())
 
 
 def _launch_ui(host: str, port: int, share: bool) -> None:
+    """Standalone Gradio UI (legacy, for development only)."""
     from content_factory.ui.app import build_ui
-
     demo = build_ui()
     demo.launch(server_name=host, server_port=port, share=share)
 
@@ -58,9 +58,9 @@ def _auth_youtube() -> None:
             "    and set YOUTUBE_CLIENT_SECRET=/path/to/that/file.json"
         )
         return
-    print(f"🌐  Opening browser for Google OAuth…\n    Token will be saved to: {YOUTUBE_TOKEN_FILE}")
+    print(f"Opening browser for Google OAuth...\n    Token will be saved to: {YOUTUBE_TOKEN_FILE}")
     authenticate(YOUTUBE_CLIENT_SECRET, YOUTUBE_TOKEN_FILE)
-    print("✅  YouTube authorisation complete!")
+    print("YouTube authorisation complete!")
 
 
 def _launch_api(host: str, port: int) -> None:

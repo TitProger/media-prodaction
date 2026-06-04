@@ -4,11 +4,15 @@ Folder layout
 -------------
     storage/library/{user_id}/
         top_videos/
-            sources/                 ← long source videos
+            sources/                 ← long source videos (split-screen top)
             clips/
                 {source_stem}/       ← clips cut from that source
         bottom_videos/
             sources/
+            clips/
+                {source_stem}/
+        blog_videos/
+            sources/                 ← long source videos (single-video / blog mode)
             clips/
                 {source_stem}/
         banners/
@@ -31,12 +35,13 @@ from pathlib import Path
 
 from content_factory.config.settings import LIBRARY_DB, STORAGE_DIR
 
-CATEGORIES = {"top_video", "bottom_video", "banner_image", "banner_video"}
-VIDEO_CATEGORIES = {"top_video", "bottom_video"}
+CATEGORIES = {"top_video", "bottom_video", "blog_video", "banner_image", "banner_video"}
+VIDEO_CATEGORIES = {"top_video", "bottom_video", "blog_video"}
 
 _VIDEO_DIR = {
     "top_video":    "top_videos",
     "bottom_video": "bottom_videos",
+    "blog_video":   "blog_videos",
 }
 
 
@@ -92,6 +97,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if "used" not in existing:
         conn.execute(
             "ALTER TABLE media_files ADD COLUMN used INTEGER NOT NULL DEFAULT 0"
+        )
+    if "in_progress" not in existing:
+        conn.execute(
+            "ALTER TABLE media_files ADD COLUMN in_progress INTEGER NOT NULL DEFAULT 0"
         )
 
 
@@ -272,25 +281,36 @@ def mark_used(file_id: int) -> None:
 
 
 def count_unused_clips(user_id: int, parent_id: int) -> int:
-    """Count clips for a source that have not been used yet."""
+    """Count clips that are free (not used and not in_progress)."""
     with _connect() as conn:
         row = conn.execute(
             """SELECT COUNT(*) FROM media_files
-               WHERE user_id=? AND parent_id=? AND subtype='clip' AND used=0""",
+               WHERE user_id=? AND parent_id=? AND subtype='clip' AND used=0 AND in_progress=0""",
             (user_id, parent_id),
         ).fetchone()
         return row[0] if row else 0
 
 
 def pick_random_unused_clip(user_id: int, parent_id: int) -> sqlite3.Row | None:
-    """Return a random unused clip for a source, or None if all are used."""
+    """Return a random unused clip and atomically mark it in_progress to prevent races."""
     with _connect() as conn:
-        return conn.execute(
+        row = conn.execute(
             """SELECT * FROM media_files
-               WHERE user_id=? AND parent_id=? AND subtype='clip' AND used=0
+               WHERE user_id=? AND parent_id=? AND subtype='clip' AND used=0 AND in_progress=0
                ORDER BY RANDOM() LIMIT 1""",
             (user_id, parent_id),
         ).fetchone()
+        if row is not None:
+            conn.execute(
+                "UPDATE media_files SET in_progress=1 WHERE id=?", (row["id"],)
+            )
+        return row
+
+
+def release_clip(file_id: int) -> None:
+    """Release in_progress lock without marking as used (call on pipeline failure)."""
+    with _connect() as conn:
+        conn.execute("UPDATE media_files SET in_progress=0 WHERE id=?", (file_id,))
 
 
 def pick_random_clip(user_id: int, parent_id: int) -> sqlite3.Row | None:

@@ -9,15 +9,14 @@ States
 None                — idle, show menu
 'lib_await_file'    — library upload: waiting for the media file
 'lib_await_name'    — library upload: waiting for a text name
-'shorts_top'        — create-shorts: waiting for top video
-'shorts_bottom'     — create-shorts: waiting for bottom video
-'shorts_banner'     — create-shorts: waiting for banner
 """
 from __future__ import annotations
 
 import asyncio
 import html as _html
 import logging
+import subprocess
+import traceback
 import uuid
 from pathlib import Path
 
@@ -46,11 +45,12 @@ from content_factory.config.settings import (
     BANNER_FADE_SEC,
     BOTTOM_CLIP_DURATION,
     OUTPUT_DIR,
+    SINGLE_SUBTITLE_MARGIN_V,
     TELEGRAM_BOT_TOKEN,
     WHISPER_MODEL,
 )
 from content_factory.core.subtitle_generator import generate_subtitles
-from content_factory.core.video_composer import compose
+from content_factory.core.video_composer import compose, compose_single
 from content_factory.core.clip_finder import find_best_clips
 from content_factory.core.video_cutter import cut_clips, split_by_duration
 from content_factory.db.library import (
@@ -72,28 +72,39 @@ from content_factory.db.library import (
 
 logger = logging.getLogger(__name__)
 
+# Keep strong references to background tasks so GC doesn't collect them early
+_background_tasks: set[asyncio.Task] = set()
+
+
+def _create_task(coro) -> asyncio.Task:
+    """Create a background task and keep a strong reference until it finishes."""
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return task
+
+
 # ─── user_data keys ──────────────────────────────────────────────────────────
-_ST          = "_state"          # current state string
-_LIB_CAT     = "_lib_category"   # category being uploaded to
-_LIB_FILE    = "_lib_file_path"  # temp path of uploaded file
-_WORK_DIR    = "_work_dir"
-_TOP         = "_top_video"
-_BOTTOM      = "_bottom_video"
-_BANNER      = "_banner_image"
+_ST      = "_state"          # current state string
+_LIB_CAT = "_lib_category"   # category being uploaded to
+_LIB_FILE = "_lib_file_path" # temp path of uploaded file
+_WORK_DIR = "_work_dir"
 
 # ─── Video categories that support AI clip cutting ───────────────────────────
 _VIDEO_CATEGORIES = _VIDEO_CATEGORIES_DB  # {"top_video", "bottom_video"}
 
 # ─── Category metadata ───────────────────────────────────────────────────────
 CATEGORY_LABEL = {
-    "top_video":    "🎬 Верхние видео",
-    "bottom_video": "🎮 Нижние видео",
+    "top_video":    "🎬 Верхние видео (сплит)",
+    "bottom_video": "🎮 Нижние видео (сплит)",
+    "blog_video":   "📱 Блог видео (один клип)",
     "banner_image": "🖼 Фото-баннеры",
     "banner_video": "📹 Видео-баннеры",
 }
 CATEGORY_HINT = {
     "top_video":    "видео-файл (MP4, MOV, AVI…)",
     "bottom_video": "видео-файл (MP4, MOV, AVI…)",
+    "blog_video":   "видео-файл (MP4, MOV, AVI…)",
     "banner_image": "фото (PNG, JPG…)",
     "banner_video": "видео-файл (MP4, MOV…)",
 }
@@ -103,20 +114,24 @@ CATEGORY_HINT = {
 
 def _kb_main() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🚀 Создать шортс",   callback_data="menu:create")],
-        [InlineKeyboardButton("📚 Библиотека медиа", callback_data="menu:library")],
+        [InlineKeyboardButton("🎬 Сплит-экран шортс",  callback_data="menu:create")],
+        [InlineKeyboardButton("📱 Один клип (блог)",   callback_data="menu:single")],
+        [InlineKeyboardButton("📚 Библиотека медиа",   callback_data="menu:library")],
     ])
 
 
 def _kb_library() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🎬 Верхние видео",  callback_data="lib:top_video"),
-            InlineKeyboardButton("🎮 Нижние видео",   callback_data="lib:bottom_video"),
+            InlineKeyboardButton("🎬 Верхние (сплит)",  callback_data="lib:top_video"),
+            InlineKeyboardButton("🎮 Нижние (сплит)",   callback_data="lib:bottom_video"),
         ],
         [
-            InlineKeyboardButton("🖼 Фото-баннеры",   callback_data="lib:banner_image"),
-            InlineKeyboardButton("📹 Видео-баннеры",  callback_data="lib:banner_video"),
+            InlineKeyboardButton("📱 Блог видео",        callback_data="lib:blog_video"),
+        ],
+        [
+            InlineKeyboardButton("🖼 Фото-баннеры",     callback_data="lib:banner_image"),
+            InlineKeyboardButton("📹 Видео-баннеры",    callback_data="lib:banner_video"),
         ],
         [InlineKeyboardButton("⬅️ Главное меню", callback_data="menu:main")],
     ])
@@ -234,6 +249,65 @@ def _kb_gen_confirm() -> InlineKeyboardMarkup:
     ])
 
 
+# ─── Single-video keyboards ──────────────────────────────────────────────────
+
+def _kb_sv_sources(rows: list) -> InlineKeyboardMarkup:
+    kb = []
+    for src in rows:
+        kb.append([InlineKeyboardButton(
+            f"🎬 {src['name']} ({src['clip_count']} клипов)",
+            callback_data=f"sv_src:{src['id']}",
+        )])
+    kb.append([InlineKeyboardButton("⬅️ Главное меню", callback_data="menu:main")])
+    return InlineKeyboardMarkup(kb)
+
+
+def _kb_sv_ai() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🤖 С AI анализом",   callback_data="sv_ai:yes"),
+            InlineKeyboardButton("⚡ Без AI (быстро)", callback_data="sv_ai:no"),
+        ],
+        [InlineKeyboardButton("⬅️ Назад", callback_data="menu:single")],
+    ])
+
+
+def _kb_sv_banner(banners: list) -> InlineKeyboardMarkup:
+    kb = [[InlineKeyboardButton("🚫 Без баннера", callback_data="sv_ban:none")]]
+    for b in banners:
+        icon = "🖼" if b["category"] == "banner_image" else "📹"
+        kb.append([InlineKeyboardButton(
+            f"{icon} {b['name']}", callback_data=f"sv_ban:{b['id']}",
+        )])
+    kb.append([InlineKeyboardButton("⬅️ Назад", callback_data="menu:single")])
+    return InlineKeyboardMarkup(kb)
+
+
+def _kb_sv_confirm() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎞 Анимация баннера:", callback_data="noop")],
+        [
+            InlineKeyboardButton("◀️ Слева",   callback_data="sv_run:slide_left"),
+            InlineKeyboardButton("▶️ Справа",  callback_data="sv_run:slide_right"),
+            InlineKeyboardButton("✨ Фейд",    callback_data="sv_run:fade"),
+        ],
+        [
+            InlineKeyboardButton("✏️ Изменить", callback_data="menu:single"),
+            InlineKeyboardButton("⬅️ Меню",     callback_data="menu:main"),
+        ],
+    ])
+
+
+def _kb_sv_confirm_no_banner() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🚀 Генерировать", callback_data="sv_run:none")],
+        [
+            InlineKeyboardButton("✏️ Изменить", callback_data="menu:single"),
+            InlineKeyboardButton("⬅️ Меню",     callback_data="menu:main"),
+        ],
+    ])
+
+
 # ─── Generation wizard text helpers ──────────────────────────────────────────
 
 def _gen_top_text(data: list[tuple]) -> str:
@@ -344,11 +418,11 @@ def _category_text(category: str, rows: list) -> str:
 
 
 def _clear_state(ud: dict) -> None:
-    for k in (_ST, _LIB_CAT, _LIB_FILE, _WORK_DIR, _TOP, _BOTTOM, _BANNER):
+    for k in (_ST, _LIB_CAT, _LIB_FILE, _WORK_DIR):
         ud.pop(k, None)
 
 
-# ─── Generation wizard state keys ────────────────────────────────────────────
+# ─── Generation wizard state keys (split-screen) ─────────────────────────────
 _GEN_TOP = "_gen_top"  # int: selected top_video source_id
 _GEN_BOT = "_gen_bot"  # int: selected bottom_video source_id
 _GEN_BAN = "_gen_ban"  # int: selected banner file_id
@@ -356,6 +430,17 @@ _GEN_BAN = "_gen_ban"  # int: selected banner file_id
 
 def _gen_clear(ud: dict) -> None:
     for k in (_GEN_TOP, _GEN_BOT, _GEN_BAN):
+        ud.pop(k, None)
+
+
+# ─── Single-video wizard state keys ──────────────────────────────────────────
+_SV_SRC = "_sv_src"   # int: selected top_video source_id (single-video mode)
+_SV_BAN = "_sv_ban"   # int | None: selected banner file_id (optional)
+_SV_AI  = "_sv_ai"    # bool: use AI clip finding
+
+
+def _sv_clear(ud: dict) -> None:
+    for k in (_SV_SRC, _SV_BAN, _SV_AI):
         ud.pop(k, None)
 
 
@@ -706,7 +791,7 @@ async def cb_gen_run(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         parse_mode=H,
     )
 
-    asyncio.create_task(_run_gen_pipeline(
+    _create_task(_run_gen_pipeline(
         chat_id=q.message.chat_id,
         bot=q.get_bot(),
         top_clip_id=top_clip["id"],
@@ -727,12 +812,6 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await _lib_recv_file(update, context)
     elif state == "lib_await_name":
         await _lib_recv_name(update, context)
-    elif state == "shorts_top":
-        await _shorts_recv_top(update, context)
-    elif state == "shorts_bottom":
-        await _shorts_recv_bottom(update, context)
-    elif state == "shorts_banner":
-        await _shorts_recv_banner(update, context)
     # else: no active state, silently ignore
 
 
@@ -788,81 +867,6 @@ async def _lib_recv_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     )
 
 
-# ─── Create-shorts steps ──────────────────────────────────────────────────────
-
-async def _download_video(msg, work_dir: Path, key: str):
-    if msg.video:
-        fo = await msg.video.get_file(); ext = ".mp4"
-    elif msg.document:
-        fo = await msg.document.get_file()
-        ext = Path(msg.document.file_name or "").suffix or ".mp4"
-    else:
-        await msg.reply_text("Пришли видео-файл.")
-        return None
-    dest = work_dir / f"{key}{ext}"
-    await fo.download_to_drive(dest)
-    return dest
-
-
-async def _shorts_recv_top(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    msg = update.message
-    await msg.reply_text("⏬ Скачиваю верхнее видео…")
-    p = await _download_video(msg, Path(context.user_data[_WORK_DIR]), "top")
-    if p is None:
-        return
-    context.user_data[_TOP] = str(p)
-    context.user_data[_ST] = "shorts_bottom"
-    await msg.reply_text(
-        "✅ Принято!\n\nШаг <b>2/3</b> — отправь <b>нижнее видео</b> (геймплей / фон).",
-        parse_mode=H,
-    )
-
-
-async def _shorts_recv_bottom(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    msg = update.message
-    await msg.reply_text("⏬ Скачиваю нижнее видео…")
-    p = await _download_video(msg, Path(context.user_data[_WORK_DIR]), "bottom")
-    if p is None:
-        return
-    context.user_data[_BOTTOM] = str(p)
-    context.user_data[_ST] = "shorts_banner"
-    await msg.reply_text(
-        "✅ Принято!\n\nШаг <b>3/3</b> — отправь <b>рекламный баннер</b> (PNG / JPG / MP4).",
-        parse_mode=H,
-    )
-
-
-async def _shorts_recv_banner(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    msg = update.message
-    wd = Path(context.user_data[_WORK_DIR])
-
-    fo = dest = None
-    if msg.photo:
-        fo = await msg.photo[-1].get_file(); dest = wd / "banner.jpg"
-    elif msg.video:
-        fo = await msg.video.get_file(); dest = wd / "banner.mp4"
-    elif msg.document:
-        fo = await msg.document.get_file()
-        ext = Path(msg.document.file_name or "").suffix or ".mp4"
-        dest = wd / f"banner{ext}"
-    else:
-        await msg.reply_text("Пришли баннер (фото или видео-файл).")
-        return
-
-    await msg.reply_text("⏬ Скачиваю баннер…")
-    await fo.download_to_drive(dest)
-    context.user_data[_BANNER] = str(dest)
-    context.user_data[_ST] = None
-
-    await msg.reply_text("✅ Все файлы получены! Запускаю обработку…")
-    asyncio.create_task(_run_pipeline(
-        chat_id=msg.chat_id,
-        bot=msg.get_bot(),
-        top=context.user_data[_TOP],
-        bottom=context.user_data[_BOTTOM],
-        banner=str(dest),
-        work_dir=wd,
-    ))
 
 
 # ─── Callback: AI clip cut ───────────────────────────────────────────────────
@@ -890,7 +894,7 @@ async def cb_lib_cut(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         )
     await q.edit_message_text(status, parse_mode=H)
 
-    asyncio.create_task(_run_cut_pipeline(
+    _create_task(_run_cut_pipeline(
         chat_id=q.message.chat_id,
         bot=q.get_bot(),
         source_id=source_id,
@@ -1003,7 +1007,6 @@ async def _run_cut_pipeline(
             )
 
     except Exception as exc:
-        import traceback
         logger.error("Cut pipeline failed:\n%s", traceback.format_exc())
         await bot.send_message(
             chat_id,
@@ -1053,8 +1056,7 @@ async def _run_gen_pipeline(
         if size_mb > 45:
             await bot.send_message(chat_id, f"⚙️ Файл {size_mb:.0f} МБ — сжимаю для отправки…")
             compressed = out.with_stem(out.stem + "_compressed")
-            import subprocess as _sp
-            _sp.run([
+            subprocess.run([
                 "ffmpeg", "-y", "-i", str(out),
                 "-c:v", "libx264", "-crf", "32", "-preset", "fast",
                 "-c:a", "aac", "-b:a", "128k",
@@ -1078,7 +1080,6 @@ async def _run_gen_pipeline(
         await bot.send_message(chat_id, "Что дальше?", reply_markup=_kb_main())
 
     except Exception as exc:
-        import traceback
         logger.error("Gen pipeline failed:\n%s", traceback.format_exc())
         await bot.send_message(
             chat_id,
@@ -1088,47 +1089,6 @@ async def _run_gen_pipeline(
         )
 
 
-# ─── Pipeline ─────────────────────────────────────────────────────────────────
-
-async def _run_pipeline(*, chat_id, bot, top, bottom, banner, work_dir: Path) -> None:
-    try:
-        loop = asyncio.get_running_loop()
-
-        await bot.send_message(chat_id, "🎙 Транскрибирую аудио (Whisper)…")
-        ass = await loop.run_in_executor(None, generate_subtitles, top, work_dir)
-
-        await bot.send_message(chat_id, "🎬 Рендерю видео (FFmpeg)…")
-        out = await loop.run_in_executor(
-            None,
-            lambda: compose(
-                top_video=top,
-                bottom_video=bottom,
-                banner_image=banner,
-                subtitle_file=ass,
-                output_path=work_dir / "output.mp4",
-                banner_appear_at=BANNER_APPEAR_AT_SEC,
-                banner_duration=BANNER_DURATION_SEC,
-                banner_fade=BANNER_FADE_SEC,
-            ),
-        )
-
-        await bot.send_message(chat_id, "✅ Готово! Отправляю видео…")
-        size_mb = out.stat().st_size / 1024 / 1024
-        with open(out, "rb") as f:
-            if size_mb <= 50:
-                await bot.send_video(chat_id, video=f,
-                    caption="🎬 Шортс готов!", supports_streaming=True)
-            else:
-                await bot.send_document(chat_id, document=f,
-                    caption=f"🎬 Шортс готов ({size_mb:.0f} МБ — отправлен как файл).")
-        await bot.send_message(chat_id, "Что дальше?", reply_markup=_kb_main())
-
-    except Exception as exc:
-        import traceback
-        logger.error("Pipeline failed:\n%s", traceback.format_exc())
-        await bot.send_message(chat_id,
-            f"❌ Ошибка:\n<code>{exc}</code>\n\nНапиши /start заново.",
-            parse_mode=ParseMode.HTML)
 
 
 # ─── Debug: log every incoming update (group -1, runs before all handlers) ────
@@ -1155,6 +1115,222 @@ async def _log_update(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         )
 
 
+# ─── Single-video wizard callbacks ───────────────────────────────────────────
+
+async def cb_menu_single(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Entry point for single-video mode."""
+    q = update.callback_query
+    await q.answer()
+    _clear_state(context.user_data)
+    _sv_clear(context.user_data)
+    user_id = q.from_user.id
+
+    sources = list_sources(user_id, "blog_video")
+    available = [s for s in sources if s["clip_count"] > 0]
+
+    if not available:
+        await q.edit_message_text(
+            "📱 <b>Один клип (блог)</b>\n\n"
+            "❌ Нет нарезанных клипов.\n"
+            "<i>Загрузи видео через 📚 Библиотека → 📱 Блог видео и нарежь их.</i>",
+            parse_mode=H,
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("⬅️ Главное меню", callback_data="menu:main"),
+            ]]),
+        )
+        return
+
+    await q.edit_message_text(
+        "📱 <b>Один клип (блог)</b>\n\nВыбери источник видео:",
+        parse_mode=H,
+        reply_markup=_kb_sv_sources(available),
+    )
+
+
+async def cb_sv_src(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """User selected a source — ask if AI analysis is needed."""
+    q = update.callback_query
+    await q.answer()
+    context.user_data[_SV_SRC] = int(q.data.split(":")[1])
+
+    await q.edit_message_text(
+        "📱 <b>Один клип (блог)</b>\n\n"
+        "🤖 Использовать AI для поиска лучших моментов?\n\n"
+        "<i>С AI — анализирует транскрипт и выбирает самые интересные фрагменты.\n"
+        "Без AI — быстрый эвристический выбор.</i>",
+        parse_mode=H,
+        reply_markup=_kb_sv_ai(),
+    )
+
+
+async def cb_sv_ai(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """User chose AI mode — now pick banner."""
+    q = update.callback_query
+    await q.answer()
+    context.user_data[_SV_AI] = q.data.split(":")[1] == "yes"
+    user_id = q.from_user.id
+
+    banners = [
+        *list_files(user_id, "banner_image"),
+        *list_files(user_id, "banner_video"),
+    ]
+
+    await q.edit_message_text(
+        "📱 <b>Один клип (блог)</b>\n\nВыбери баннер (необязательно):",
+        parse_mode=H,
+        reply_markup=_kb_sv_banner(banners),
+    )
+
+
+async def cb_sv_ban(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """User picked banner (or 'none') — show confirm screen."""
+    q = update.callback_query
+    await q.answer()
+    val = q.data.split(":")[1]
+    context.user_data[_SV_BAN] = None if val == "none" else int(val)
+    user_id = q.from_user.id
+
+    src_id  = context.user_data[_SV_SRC]
+    ban_id  = context.user_data[_SV_BAN]
+    use_ai  = context.user_data.get(_SV_AI, False)
+
+    src  = get_file(src_id, user_id)
+    ban  = get_file(ban_id, user_id) if ban_id else None
+
+    clip_count = count_unused_clips(user_id, src_id)
+    lines = [
+        "📱 <b>Один клип (блог)</b>\n",
+        f"✅ <b>Всё выбрано:</b>\n",
+        f"▸ Видео: <code>{_e(src['name'])}</code>",
+        f"▸ Баннер: <code>{_e(ban['name']) if ban else 'Нет'}</code>",
+        f"▸ AI анализ: <code>{'Да' if use_ai else 'Нет (быстро)'}</code>",
+        f"\n<i>Будет взят случайный неиспользованный клип ({clip_count} доступно).</i>",
+    ]
+    text = "\n".join(lines)
+
+    if ban:
+        await q.edit_message_text(text, parse_mode=H, reply_markup=_kb_sv_confirm())
+    else:
+        await q.edit_message_text(text, parse_mode=H, reply_markup=_kb_sv_confirm_no_banner())
+
+
+async def cb_sv_run(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Start single-video generation."""
+    q = update.callback_query
+    await q.answer("🎬 Запускаю…")
+    user_id = q.from_user.id
+
+    animation = q.data.split(":")[1]  # "slide_left" | "slide_right" | "fade" | "none"
+    src_id    = context.user_data.get(_SV_SRC)
+    ban_id    = context.user_data.get(_SV_BAN)
+    use_ai    = context.user_data.get(_SV_AI, False)
+
+    if not src_id:
+        await q.edit_message_text("❌ Выбор утерян — начни заново.", reply_markup=_kb_main())
+        return
+
+    clip = pick_random_unused_clip(user_id, src_id)
+    if not clip:
+        await q.edit_message_text(
+            "😕 Все клипы уже использованы. Нарежи новые в 📱 Блог видео!",
+            reply_markup=_kb_main(),
+        )
+        return
+
+    banner = get_file(ban_id, user_id) if ban_id else None
+    _sv_clear(context.user_data)
+    work_dir = _make_work_dir(user_id)
+
+    await q.edit_message_text(
+        f"📱 <b>Генерирую клип…</b>\n\n"
+        f"▸ Клип:   <code>{_e(clip['name'])}</code>\n"
+        f"▸ Баннер: <code>{_e(banner['name']) if banner else 'Нет'}</code>\n"
+        f"▸ AI:     <code>{'Да' if use_ai else 'Нет'}</code>",
+        parse_mode=H,
+    )
+
+    _create_task(_run_single_pipeline(
+        chat_id=q.message.chat_id,
+        bot=q.get_bot(),
+        clip_id=clip["id"],
+        clip_path=clip["file_path"],
+        banner_path=banner["file_path"] if banner else None,
+        work_dir=work_dir,
+        use_ai=use_ai,
+        banner_animation=animation if animation != "none" else "fade",
+    ))
+
+
+async def _run_single_pipeline(
+    *, chat_id: int, bot,
+    clip_id: int, clip_path: str,
+    banner_path: str | None,
+    work_dir: Path,
+    use_ai: bool = False,
+    banner_animation: str = BANNER_ANIMATION,
+) -> None:
+    try:
+        loop = asyncio.get_running_loop()
+
+        await bot.send_message(chat_id, "🎙 Транскрибирую аудио (Whisper)…")
+        ass = await loop.run_in_executor(
+            None,
+            lambda: generate_subtitles(
+                clip_path, work_dir,
+                margin_v=SINGLE_SUBTITLE_MARGIN_V,
+            ),
+        )
+
+        await bot.send_message(chat_id, "🎬 Рендерю видео (FFmpeg)…")
+        out: Path = await loop.run_in_executor(
+            None,
+            lambda: compose_single(
+                video=clip_path,
+                subtitle_file=ass,
+                output_path=work_dir / "output.mp4",
+                banner_image=banner_path,
+                banner_animation=banner_animation,
+            ),
+        )
+
+        mark_used(clip_id)
+
+        await bot.send_message(chat_id, "✅ Готово! Отправляю видео…")
+        size_mb = out.stat().st_size / 1024 / 1024
+
+        if size_mb > 45:
+            await bot.send_message(chat_id, f"⚙️ Файл {size_mb:.0f} МБ — сжимаю…")
+            compressed = out.with_stem(out.stem + "_compressed")
+            subprocess.run([
+                "ffmpeg", "-y", "-i", str(out),
+                "-c:v", "libx264", "-crf", "32", "-preset", "fast",
+                "-c:a", "aac", "-b:a", "128k",
+                "-movflags", "+faststart", str(compressed),
+            ], capture_output=True)
+            if compressed.exists() and compressed.stat().st_size < out.stat().st_size:
+                out = compressed
+                size_mb = out.stat().st_size / 1024 / 1024
+
+        with open(out, "rb") as f:
+            if size_mb <= 50:
+                await bot.send_video(chat_id, video=f,
+                    caption="📱 Клип готов!", supports_streaming=True)
+            else:
+                await bot.send_document(chat_id, document=f,
+                    caption=f"📱 Клип готов ({size_mb:.0f} МБ — как файл).")
+
+        await bot.send_message(chat_id, "Что дальше?", reply_markup=_kb_main())
+
+    except Exception as exc:
+        logger.error("Single pipeline failed:\n%s", traceback.format_exc())
+        await bot.send_message(
+            chat_id,
+            f"❌ Ошибка:\n<code>{_e(str(exc))}</code>\n\nНапиши /start заново.",
+            parse_mode=H,
+            reply_markup=_kb_main(),
+        )
+
+
 # ─── Catch-all callback (runs last — catches unmatched callbacks) ─────────────
 
 async def _cb_catch_all(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1167,7 +1343,6 @@ async def _cb_catch_all(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 # ─── Error handler ────────────────────────────────────────────────────────────
 
 async def _on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    import traceback
     logger.error("Unhandled exception:\n%s",
         "".join(traceback.format_exception(type(context.error), context.error, context.error.__traceback__)))
 
@@ -1196,13 +1371,20 @@ def build_bot(notify_chat_id: int | None = None) -> Application:
     app.add_handler(CallbackQueryHandler(cb_lib_upload_start, pattern=r"^lib_upload:[a-z_]+$"))
     app.add_handler(CallbackQueryHandler(cb_lib_cut,          pattern=r"^lib_cut:\d+:[a-z_]+$"))
 
-    # Generation wizard
+    # Generation wizard (split-screen)
     app.add_handler(CallbackQueryHandler(cb_gen_top,  pattern=r"^gen_top:\d+$"))
     app.add_handler(CallbackQueryHandler(cb_gen_bot,  pattern=r"^gen_bot:\d+$"))
     app.add_handler(CallbackQueryHandler(cb_gen_ban,  pattern=r"^gen_ban:\d+$"))
     app.add_handler(CallbackQueryHandler(cb_gen_run,  pattern=r"^gen_run:(slide_left|slide_right|fade)$"))
     app.add_handler(CallbackQueryHandler(cb_gen_step, pattern=r"^gen_step:(top|bottom|banner)$"))
     app.add_handler(CallbackQueryHandler(cb_noop,     pattern=r"^noop$"))
+
+    # Single-video wizard
+    app.add_handler(CallbackQueryHandler(cb_menu_single, pattern=r"^menu:single$"))
+    app.add_handler(CallbackQueryHandler(cb_sv_src,      pattern=r"^sv_src:\d+$"))
+    app.add_handler(CallbackQueryHandler(cb_sv_ai,       pattern=r"^sv_ai:(yes|no)$"))
+    app.add_handler(CallbackQueryHandler(cb_sv_ban,      pattern=r"^sv_ban:(\d+|none)$"))
+    app.add_handler(CallbackQueryHandler(cb_sv_run,      pattern=r"^sv_run:(slide_left|slide_right|fade|none)$"))
 
     # Catch-all callback — fires if nothing above matched (diagnostic)
     app.add_handler(CallbackQueryHandler(_cb_catch_all))

@@ -1,30 +1,48 @@
 """
 auto_generate.py — Cron job: pick random clips → generate Short → upload to YouTube.
 
-Flow
-----
-1. Pick a random top_video source that still has unused clips.
+Split-screen flow
+-----------------
+1. Pick a random top_video source with unused clips.
 2. Pick a random unused clip from it.
-3. Pick a random bottom_video source + any clip from it.
+3. Pick a random bottom_video clip.
 4. Pick a random banner (image or video).
-5. Generate subtitles + compose the Short via FFmpeg.
+5. Generate subtitles + compose via FFmpeg (compose).
 6. Upload to YouTube.
-7. Mark the top clip as used (done ONLY after successful upload).
+7. Mark the top clip as used.
+
+Blog flow (single-clip, no banner)
+-----------------------------------
+1. Pick a random blog_video source with unused clips.
+2. Pick a random unused clip from it.
+3. Generate subtitles + compose via FFmpeg (compose_single, no banner).
+4. Upload to YouTube.
+5. Mark the blog clip as used.
 """
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import random
+import re
 import uuid
 from pathlib import Path
 
+import shutil
+import time
+
 from content_factory.config.settings import (
+    LIBRARY_DB,
     ANTHROPIC_API_KEY,
     BANNER_ANIMATION,
     CLAUDE_MODEL,
     GEMINI_API_KEY,
     GEMINI_MODEL,
+    GROQ_API_KEY,
+    GROQ_MODEL,
+    OPENAI_API_KEY,
+    OPENAI_MODEL,
     OUTPUT_DIR,
     WEB_USER_ID,
     YOUTUBE_AI_DESCRIPTION,
@@ -42,6 +60,7 @@ from content_factory.db.library import (
     mark_used,
     pick_random_clip,
     pick_random_unused_clip,
+    release_clip,
 )
 
 logger = logging.getLogger(__name__)
@@ -51,37 +70,66 @@ logger = logging.getLogger(__name__)
 
 _META_SYSTEM = (
     "You are a YouTube Shorts content manager. "
-    "Your goal is to maximise views by writing SEO-optimised, trend-matching metadata."
+    "Your goal is to maximise views by writing SEO-optimised, viral-trend-matching metadata."
 )
 
 _META_PROMPT = """\
 Generate YouTube Shorts metadata for a video clip.
 
 Clip title: {clip_title}
+Mode: {mode}
 
 Rules (STRICTLY follow):
 - Reply ONLY with a valid JSON object — no markdown, no explanation.
-- "title": max 80 chars, catchy, in the SAME language as the clip title, add 1-2 relevant emojis
-- "description": 200-350 chars, match the clip language, end with 6-9 trending hashtags \
-(mix native-language + English: #Shorts #viral #trending etc.)
-- "tags": list of 12-18 strings — mix native keywords + English trending tags for Shorts/Reels
+- "title": max 80 chars, catchy and intriguing, in the SAME language as the clip title, add 1-2 relevant emojis
+- "description": 80-150 chars ONLY — ultra-brief, punchy, hook-style. \
+End with 3-5 trending hashtags (#Shorts #viral #trending etc.). NO long text.
+- "tags": list of 25-35 strings — mix native-language keywords + English trending tags. \
+Include: topic-specific, emotion tags, format tags (Shorts, Reels, viral, trending, fyp, foryou, \
+foryoupage, explore), niche tags, and broad discovery tags. More tags = better reach.
 
 JSON format:
 {{"title": "...", "description": "...", "tags": ["...", "..."]}}
 """
 
 
-def _generate_meta(clip_title: str) -> dict:
+def _generate_meta(clip_title: str, mode: str = "split") -> dict:
     """
-    Ask Gemini (or Claude as fallback) to generate YouTube title, description, and tags.
-    Returns a dict with keys: title, description, tags (list[str]).
-    Falls back to static defaults if no AI key is configured or on any error.
+    Ask AI to generate YouTube title, description, and tags.
+    Returns dict with keys: title, description, tags (list[str]).
+    Falls back to static defaults if no AI key or on error.
     """
-    prompt = _META_PROMPT.format(clip_title=clip_title)
+    prompt = _META_PROMPT.format(clip_title=clip_title, mode=mode)
 
     raw: str | None = None
     try:
-        if GEMINI_API_KEY:
+        if GROQ_API_KEY:
+            from groq import Groq
+            client = Groq(api_key=GROQ_API_KEY)
+            response = client.chat.completions.create(
+                model=GROQ_MODEL,
+                max_tokens=700,
+                messages=[
+                    {"role": "system", "content": _META_SYSTEM},
+                    {"role": "user", "content": prompt},
+                ],
+            )
+            raw = response.choices[0].message.content.strip()
+            logger.info("[cron] Meta generated via Groq (%s)", GROQ_MODEL)
+        elif OPENAI_API_KEY:
+            from openai import OpenAI
+            client = OpenAI(api_key=OPENAI_API_KEY)
+            response = client.chat.completions.create(
+                model=OPENAI_MODEL,
+                max_tokens=700,
+                messages=[
+                    {"role": "system", "content": _META_SYSTEM},
+                    {"role": "user", "content": prompt},
+                ],
+            )
+            raw = response.choices[0].message.content.strip()
+            logger.info("[cron] Meta generated via OpenAI (%s)", OPENAI_MODEL)
+        elif GEMINI_API_KEY:
             from google import genai
             client = genai.Client(api_key=GEMINI_API_KEY)
             response = client.models.generate_content(
@@ -95,7 +143,7 @@ def _generate_meta(clip_title: str) -> dict:
             client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
             message = client.messages.create(
                 model=CLAUDE_MODEL,
-                max_tokens=512,
+                max_tokens=700,
                 system=_META_SYSTEM,
                 messages=[{"role": "user", "content": prompt}],
             )
@@ -108,8 +156,6 @@ def _generate_meta(clip_title: str) -> dict:
         logger.warning("[cron] Meta generation failed (%s) — using static defaults", exc)
         return {}
 
-    # Strip optional markdown code fences
-    import re
     raw = re.sub(r"^```[a-z]*\n?", "", raw).rstrip("` \n")
 
     try:
@@ -124,41 +170,31 @@ def _generate_meta(clip_title: str) -> dict:
         return {}
 
 
-async def run_once() -> str:
-    """
-    Run one auto-generate cycle.
+# ─── Split-screen pipeline ────────────────────────────────────────────────────
 
+async def run_once_split() -> str:
+    """
+    One split-screen auto-generate cycle.
     Returns the YouTube video URL on success.
     Raises RuntimeError with a human-readable reason if skipped.
     """
-    from content_factory.core.youtube_uploader import is_authenticated, upload_video
+    from content_factory.core.youtube_uploader import upload_video
     from content_factory.core.subtitle_generator import generate_subtitles
     from content_factory.core.video_composer import compose
 
-    # ── 0. Pre-flight checks ──────────────────────────────────────────────────
-    if not YOUTUBE_CLIENT_SECRET:
-        raise RuntimeError("YOUTUBE_CLIENT_SECRET not set in .env")
-    if not is_authenticated(YOUTUBE_TOKEN_FILE):
-        raise RuntimeError(
-            "YouTube token missing — run: python main.py auth-youtube"
-        )
-
-    # ── 1. Pick top clip ──────────────────────────────────────────────────────
+    # 1. Pick top clip
     top_sources = list_sources(WEB_USER_ID, "top_video")
-    top_with_unused = [
-        s for s in top_sources
-        if count_unused_clips(WEB_USER_ID, s["id"]) > 0
-    ]
+    top_with_unused = [s for s in top_sources if count_unused_clips(WEB_USER_ID, s["id"]) > 0]
     if not top_with_unused:
-        raise RuntimeError("No unused top clips left — upload & cut new videos")
+        raise RuntimeError("No unused top clips — upload & cut new videos")
 
     top_source = random.choice(top_with_unused)
     top_clip   = pick_random_unused_clip(WEB_USER_ID, top_source["id"])
     if top_clip is None:
         raise RuntimeError("Race condition: top clip disappeared, retry later")
 
-    # ── 2. Pick bottom clip ───────────────────────────────────────────────────
-    bot_sources  = list_sources(WEB_USER_ID, "bottom_video")
+    # 2. Pick bottom clip
+    bot_sources    = list_sources(WEB_USER_ID, "bottom_video")
     bot_with_clips = [s for s in bot_sources if s["clip_count"] > 0]
     if not bot_with_clips:
         raise RuntimeError("No bottom video clips — upload & cut bottom videos")
@@ -168,7 +204,7 @@ async def run_once() -> str:
     if bot_clip is None:
         raise RuntimeError("No bottom clip found")
 
-    # ── 3. Pick banner ────────────────────────────────────────────────────────
+    # 3. Pick banner
     banners = [
         *list_files(WEB_USER_ID, "banner_image"),
         *list_files(WEB_USER_ID, "banner_video"),
@@ -179,21 +215,21 @@ async def run_once() -> str:
     banner = random.choice(banners)
 
     logger.info(
-        "[cron] Selected → top: %s | bottom: %s | banner: %s",
+        "[cron/split] top=%s | bottom=%s | banner=%s",
         top_clip["name"], bot_clip["name"], banner["name"],
     )
 
-    # ── 4. Generate ───────────────────────────────────────────────────────────
-    work_dir = OUTPUT_DIR / f"cron_{uuid.uuid4().hex[:8]}"
+    # 4. Generate subtitles + compose
+    work_dir = OUTPUT_DIR / f"cron_split_{uuid.uuid4().hex[:8]}"
     work_dir.mkdir(parents=True, exist_ok=True)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
-    logger.info("[cron] Generating subtitles…")
+    logger.info("[cron/split] Generating subtitles…")
     ass_path = await loop.run_in_executor(
         None, generate_subtitles, top_clip["file_path"], work_dir
     )
 
-    logger.info("[cron] Composing video (FFmpeg)…")
+    logger.info("[cron/split] Composing video…")
     output_path = work_dir / "output.mp4"
     await loop.run_in_executor(
         None,
@@ -207,12 +243,11 @@ async def run_once() -> str:
         ),
     )
 
-    # ── 5. Build metadata (AI or static) ─────────────────────────────────────
+    # 5. Build metadata
     static_tags = [t.strip() for t in YOUTUBE_TAGS.split(",") if t.strip()]
-
     if YOUTUBE_AI_DESCRIPTION:
-        logger.info("[cron] Generating AI metadata for: %s", top_clip["name"])
-        meta = await loop.run_in_executor(None, _generate_meta, top_clip["name"])
+        logger.info("[cron/split] Generating AI metadata for: %s", top_clip["name"])
+        meta = await loop.run_in_executor(None, _generate_meta, top_clip["name"], "split-screen gaming shorts")
     else:
         meta = {}
 
@@ -220,40 +255,195 @@ async def run_once() -> str:
     description = meta.get("description") or YOUTUBE_DESCRIPTION
     tags        = meta.get("tags") or static_tags
 
-    logger.info("[cron] Title: %s", title)
+    logger.info("[cron/split] Title: %s | Tags: %d", title, len(tags))
 
-    # ── 6. Upload ─────────────────────────────────────────────────────────────
-    logger.info("[cron] Uploading to YouTube (privacy=%s)…", YOUTUBE_PRIVACY_STATUS)
-    video_id = await loop.run_in_executor(
-        None,
-        lambda: upload_video(
-            output_path,
-            title,
-            description=description,
-            tags=tags,
-            privacy=YOUTUBE_PRIVACY_STATUS,
-            client_secret_path=YOUTUBE_CLIENT_SECRET,
-            token_path=YOUTUBE_TOKEN_FILE,
-        ),
-    )
+    # 6. Upload
+    size_mb = output_path.stat().st_size / 1024 / 1024
+    logger.info("[cron/split] Uploading %.1f MB (privacy=%s)…", size_mb, YOUTUBE_PRIVACY_STATUS)
+    try:
+        video_id = await loop.run_in_executor(
+            None,
+            lambda: upload_video(
+                output_path, title,
+                description=description,
+                tags=tags,
+                privacy=YOUTUBE_PRIVACY_STATUS,
+                client_secret_path=YOUTUBE_CLIENT_SECRET,
+                token_path=YOUTUBE_TOKEN_FILE,
+            ),
+        )
+    except Exception as exc:
+        release_clip(top_clip["id"])
+        exc_str = str(exc)
+        if "uploadLimitExceeded" in exc_str:
+            raise RuntimeError("YouTube upload limit — verify at youtube.com/verify")
+        if "quotaExceeded" in exc_str or "forbidden" in exc_str.lower():
+            raise RuntimeError(f"YouTube quota/permission error: {exc_str[:200]}")
+        raise
 
-    # ── 7. Mark used (only after confirmed upload) ────────────────────────────
     mark_used(top_clip["id"])
-
     url = f"https://youtube.com/shorts/{video_id}"
-    logger.info("[cron] ✅ Done → %s", url)
+    logger.info("[cron/split] ✅ Done → %s", url)
     return url
 
 
+# ─── Blog pipeline (single-clip, no banner) ──────────────────────────────────
+
+async def run_once_blog() -> str:
+    """
+    One blog-video auto-generate cycle (single clip, no banner).
+    Returns the YouTube video URL on success.
+    Raises RuntimeError with a human-readable reason if skipped.
+    """
+    from content_factory.core.youtube_uploader import upload_video
+    from content_factory.core.subtitle_generator import generate_subtitles
+    from content_factory.core.video_composer import compose_single
+
+    # 1. Pick blog clip
+    blog_sources = list_sources(WEB_USER_ID, "blog_video")
+    blog_with_unused = [s for s in blog_sources if count_unused_clips(WEB_USER_ID, s["id"]) > 0]
+    if not blog_with_unused:
+        raise RuntimeError("No unused blog clips — upload & cut new blog videos")
+
+    blog_source = random.choice(blog_with_unused)
+    blog_clip   = pick_random_unused_clip(WEB_USER_ID, blog_source["id"])
+    if blog_clip is None:
+        raise RuntimeError("Race condition: blog clip disappeared, retry later")
+
+    logger.info("[cron/blog] clip=%s", blog_clip["name"])
+
+    # 2. Generate subtitles + compose (no banner)
+    work_dir = OUTPUT_DIR / f"cron_blog_{uuid.uuid4().hex[:8]}"
+    work_dir.mkdir(parents=True, exist_ok=True)
+    loop = asyncio.get_running_loop()
+
+    logger.info("[cron/blog] Generating subtitles…")
+    ass_path = await loop.run_in_executor(
+        None, generate_subtitles, blog_clip["file_path"], work_dir
+    )
+
+    logger.info("[cron/blog] Composing video…")
+    output_path = work_dir / "output.mp4"
+    await loop.run_in_executor(
+        None,
+        lambda: compose_single(
+            video=blog_clip["file_path"],
+            subtitle_file=ass_path,
+            output_path=output_path,
+            banner_image=None,
+        ),
+    )
+
+    # 3. Build metadata
+    static_tags = [t.strip() for t in YOUTUBE_TAGS.split(",") if t.strip()]
+    if YOUTUBE_AI_DESCRIPTION:
+        logger.info("[cron/blog] Generating AI metadata for: %s", blog_clip["name"])
+        meta = await loop.run_in_executor(None, _generate_meta, blog_clip["name"], "blog talking-head vertical video")
+    else:
+        meta = {}
+
+    title       = meta.get("title") or (blog_clip["name"][:87] + " #Shorts")
+    description = meta.get("description") or YOUTUBE_DESCRIPTION
+    tags        = meta.get("tags") or static_tags
+
+    logger.info("[cron/blog] Title: %s | Tags: %d", title, len(tags))
+
+    # 4. Upload
+    size_mb = output_path.stat().st_size / 1024 / 1024
+    logger.info("[cron/blog] Uploading %.1f MB (privacy=%s)…", size_mb, YOUTUBE_PRIVACY_STATUS)
+    try:
+        video_id = await loop.run_in_executor(
+            None,
+            lambda: upload_video(
+                output_path, title,
+                description=description,
+                tags=tags,
+                privacy=YOUTUBE_PRIVACY_STATUS,
+                client_secret_path=YOUTUBE_CLIENT_SECRET,
+                token_path=YOUTUBE_TOKEN_FILE,
+            ),
+        )
+    except Exception as exc:
+        release_clip(blog_clip["id"])
+        exc_str = str(exc)
+        if "uploadLimitExceeded" in exc_str:
+            raise RuntimeError("YouTube upload limit — verify at youtube.com/verify")
+        if "quotaExceeded" in exc_str or "forbidden" in exc_str.lower():
+            raise RuntimeError(f"YouTube quota/permission error: {exc_str[:200]}")
+        raise
+
+    mark_used(blog_clip["id"])
+    url = f"https://youtube.com/shorts/{video_id}"
+    logger.info("[cron/blog] ✅ Done → %s", url)
+    return url
+
+
+# ─── Unified cron entry point ─────────────────────────────────────────────────
+
+async def run_once() -> str:
+    """
+    Run one auto-generate cycle — randomly picks split-screen or blog mode
+    based on what clips are available.
+    """
+    from content_factory.core.youtube_uploader import is_authenticated
+
+    if not YOUTUBE_CLIENT_SECRET:
+        raise RuntimeError("YOUTUBE_CLIENT_SECRET not set in .env")
+    if not is_authenticated(YOUTUBE_TOKEN_FILE):
+        raise RuntimeError("YouTube token missing — run: python main.py auth-youtube")
+
+    # Check what's available
+    blog_sources   = list_sources(WEB_USER_ID, "blog_video")
+    blog_available = any(count_unused_clips(WEB_USER_ID, s["id"]) > 0 for s in blog_sources)
+
+    top_sources   = list_sources(WEB_USER_ID, "top_video")
+    split_available = any(count_unused_clips(WEB_USER_ID, s["id"]) > 0 for s in top_sources)
+
+    if not blog_available and not split_available:
+        raise RuntimeError("No unused clips in any category — upload & cut new videos")
+
+    # Choose mode
+    if blog_available and split_available:
+        mode = random.choice(["blog", "split"])
+    elif blog_available:
+        mode = "blog"
+    else:
+        mode = "split"
+
+    logger.info("[cron] Selected mode: %s", mode)
+
+    if mode == "blog":
+        return await run_once_blog()
+    else:
+        return await run_once_split()
+
+
+async def weekly_reset_used(context) -> None:
+    """Reset used=0 and in_progress=0 for all clips so they re-enter rotation."""
+    from content_factory.db.library import _connect
+    with _connect() as conn:
+        result = conn.execute(
+            "UPDATE media_files SET used=0, in_progress=0 WHERE subtype='clip'"
+        )
+    logger.info("[cron] Weekly reset: %d clips returned to rotation", result.rowcount)
+
+
+async def hourly_backup_db(context) -> None:
+    """Copy library.db → library.db.backup for disaster recovery."""
+    db_path = LIBRARY_DB
+    if not db_path.exists():
+        return
+    backup = db_path.with_suffix(".db.backup")
+    shutil.copy2(db_path, backup)
+    size_kb = backup.stat().st_size // 1024
+    logger.info("[cron] DB backup → %s (%d KB)", backup.name, size_kb)
+
+
 async def cron_job(context) -> None:
-    """
-    Entry point for python-telegram-bot JobQueue.
-    Runs run_once() and sends result/error to the bot owner if chat_id is set.
-    """
+    """Entry point for python-telegram-bot JobQueue."""
     try:
         url = await run_once()
         logger.info("[cron] Cycle complete: %s", url)
-        # Optional: notify bot owner
         if context.job.data and context.job.data.get("chat_id"):
             await context.bot.send_message(
                 context.job.data["chat_id"],
@@ -266,10 +456,7 @@ async def cron_job(context) -> None:
 
 
 def register(app, notify_chat_id: int | None = None) -> None:
-    """
-    Register the cron job with the bot's JobQueue.
-    Call this inside build_bot() after the app is created.
-    """
+    """Register the cron job with the bot's JobQueue."""
     if not YOUTUBE_CLIENT_SECRET:
         logger.info("[cron] YOUTUBE_CLIENT_SECRET not set — auto-upload disabled")
         return
@@ -282,7 +469,7 @@ def register(app, notify_chat_id: int | None = None) -> None:
     app.job_queue.run_repeating(
         cron_job,
         interval=interval,
-        first=60,  # first run 60 s after bot starts
+        first=60,
         name="auto_generate",
         data={"chat_id": notify_chat_id},
     )
@@ -291,3 +478,21 @@ def register(app, notify_chat_id: int | None = None) -> None:
         YOUTUBE_CRON_INTERVAL_HOURS,
         YOUTUBE_PRIVACY_STATUS,
     )
+
+    # Hourly DB backup
+    app.job_queue.run_repeating(
+        hourly_backup_db,
+        interval=3600,
+        first=120,
+        name="db_backup",
+    )
+    logger.info("[cron] DB backup scheduled every 1 h")
+
+    # Weekly reset of used clips (every 7 days)
+    app.job_queue.run_repeating(
+        weekly_reset_used,
+        interval=7 * 24 * 3600,
+        first=300,
+        name="weekly_reset",
+    )
+    logger.info("[cron] Weekly clip reset scheduled every 7 days")

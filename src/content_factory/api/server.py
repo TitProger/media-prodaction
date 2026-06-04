@@ -15,6 +15,8 @@ import uuid
 from pathlib import Path as FilePath
 from typing import Annotated, Literal
 
+from contextlib import asynccontextmanager
+
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Path, UploadFile
 from fastapi.openapi.utils import get_openapi
 from pydantic import BaseModel, Field
@@ -33,11 +35,18 @@ from content_factory.db.library import (
     list_files,
 )
 
-CategoryLiteral = Literal["top_video", "bottom_video", "banner_image", "banner_video"]
+CategoryLiteral = Literal["top_video", "bottom_video", "blog_video", "banner_image", "banner_video"]
 
 # ─── App ─────────────────────────────────────────────────────────────────────
 
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    init_db()
+    yield
+
+
 app = FastAPI(
+    lifespan=_lifespan,
     title="Content Factory API",
     description="""
 Media library management API for the Content Factory short-form video pipeline.
@@ -66,6 +75,10 @@ Set `API_SECRET_KEY` in your `.env` file (default: `changeme-set-in-env`).
     contact={"name": "Content Factory"},
 )
 
+# ─── Mount Gradio UI at root "/" ──────────────────────────────────────────────
+import gradio as gr
+from content_factory.ui.app import build_ui as _build_ui
+app = gr.mount_gradio_app(app, _build_ui(), path="/")
 
 # ─── Pydantic schemas ────────────────────────────────────────────────────────
 
@@ -111,11 +124,6 @@ def _auth(x_api_key: Annotated[str, Header(description="Your API secret key")] =
 
 Auth = Annotated[None, Depends(_auth)]
 
-# ─── Startup ─────────────────────────────────────────────────────────────────
-
-@app.on_event("startup")
-async def _startup() -> None:
-    init_db()
 
 
 # ─── Upload ──────────────────────────────────────────────────────────────────
