@@ -20,9 +20,14 @@ import uuid
 from pathlib import Path
 
 from content_factory.config.settings import (
+    ANTHROPIC_API_KEY,
     BANNER_ANIMATION,
+    CLAUDE_MODEL,
+    GEMINI_API_KEY,
+    GEMINI_MODEL,
     OUTPUT_DIR,
     WEB_USER_ID,
+    YOUTUBE_AI_DESCRIPTION,
     YOUTUBE_CLIENT_SECRET,
     YOUTUBE_CRON_INTERVAL_HOURS,
     YOUTUBE_DESCRIPTION,
@@ -40,6 +45,83 @@ from content_factory.db.library import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# ─── AI meta generation ───────────────────────────────────────────────────────
+
+_META_SYSTEM = (
+    "You are a YouTube Shorts content manager. "
+    "Your goal is to maximise views by writing SEO-optimised, trend-matching metadata."
+)
+
+_META_PROMPT = """\
+Generate YouTube Shorts metadata for a video clip.
+
+Clip title: {clip_title}
+
+Rules (STRICTLY follow):
+- Reply ONLY with a valid JSON object — no markdown, no explanation.
+- "title": max 80 chars, catchy, in the SAME language as the clip title, add 1-2 relevant emojis
+- "description": 200-350 chars, match the clip language, end with 6-9 trending hashtags \
+(mix native-language + English: #Shorts #viral #trending etc.)
+- "tags": list of 12-18 strings — mix native keywords + English trending tags for Shorts/Reels
+
+JSON format:
+{{"title": "...", "description": "...", "tags": ["...", "..."]}}
+"""
+
+
+def _generate_meta(clip_title: str) -> dict:
+    """
+    Ask Gemini (or Claude as fallback) to generate YouTube title, description, and tags.
+    Returns a dict with keys: title, description, tags (list[str]).
+    Falls back to static defaults if no AI key is configured or on any error.
+    """
+    prompt = _META_PROMPT.format(clip_title=clip_title)
+
+    raw: str | None = None
+    try:
+        if GEMINI_API_KEY:
+            from google import genai
+            client = genai.Client(api_key=GEMINI_API_KEY)
+            response = client.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=f"{_META_SYSTEM}\n\n{prompt}",
+            )
+            raw = response.text.strip()
+            logger.info("[cron] Meta generated via Gemini")
+        elif ANTHROPIC_API_KEY:
+            import anthropic
+            client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+            message = client.messages.create(
+                model=CLAUDE_MODEL,
+                max_tokens=512,
+                system=_META_SYSTEM,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            raw = message.content[0].text.strip()
+            logger.info("[cron] Meta generated via Claude")
+        else:
+            logger.info("[cron] No AI key — using static description")
+            return {}
+    except Exception as exc:
+        logger.warning("[cron] Meta generation failed (%s) — using static defaults", exc)
+        return {}
+
+    # Strip optional markdown code fences
+    import re
+    raw = re.sub(r"^```[a-z]*\n?", "", raw).rstrip("` \n")
+
+    try:
+        meta = json.loads(raw)
+        return {
+            "title":       str(meta.get("title", "")).strip()[:90] or "",
+            "description": str(meta.get("description", "")).strip() or "",
+            "tags":        [str(t).strip() for t in meta.get("tags", []) if str(t).strip()],
+        }
+    except Exception as exc:
+        logger.warning("[cron] Meta JSON parse error (%s) — using static defaults", exc)
+        return {}
 
 
 async def run_once() -> str:
@@ -125,17 +207,29 @@ async def run_once() -> str:
         ),
     )
 
-    # ── 5. Upload ─────────────────────────────────────────────────────────────
-    title = top_clip["name"][:90] + " #Shorts"
-    tags  = [t.strip() for t in YOUTUBE_TAGS.split(",") if t.strip()]
+    # ── 5. Build metadata (AI or static) ─────────────────────────────────────
+    static_tags = [t.strip() for t in YOUTUBE_TAGS.split(",") if t.strip()]
 
+    if YOUTUBE_AI_DESCRIPTION:
+        logger.info("[cron] Generating AI metadata for: %s", top_clip["name"])
+        meta = await loop.run_in_executor(None, _generate_meta, top_clip["name"])
+    else:
+        meta = {}
+
+    title       = meta.get("title") or (top_clip["name"][:87] + " #Shorts")
+    description = meta.get("description") or YOUTUBE_DESCRIPTION
+    tags        = meta.get("tags") or static_tags
+
+    logger.info("[cron] Title: %s", title)
+
+    # ── 6. Upload ─────────────────────────────────────────────────────────────
     logger.info("[cron] Uploading to YouTube (privacy=%s)…", YOUTUBE_PRIVACY_STATUS)
     video_id = await loop.run_in_executor(
         None,
         lambda: upload_video(
             output_path,
             title,
-            description=YOUTUBE_DESCRIPTION,
+            description=description,
             tags=tags,
             privacy=YOUTUBE_PRIVACY_STATUS,
             client_secret_path=YOUTUBE_CLIENT_SECRET,
@@ -143,7 +237,7 @@ async def run_once() -> str:
         ),
     )
 
-    # ── 6. Mark used (only after confirmed upload) ────────────────────────────
+    # ── 7. Mark used (only after confirmed upload) ────────────────────────────
     mark_used(top_clip["id"])
 
     url = f"https://youtube.com/shorts/{video_id}"

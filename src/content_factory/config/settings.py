@@ -113,6 +113,9 @@ YOUTUBE_PRIVACY_STATUS = os.environ.get("YOUTUBE_PRIVACY_STATUS", "private")
 YOUTUBE_TAGS           = os.environ.get("YOUTUBE_TAGS", "shorts")
 # Description added to every upload (can be multiline via \n in .env)
 YOUTUBE_DESCRIPTION    = os.environ.get("YOUTUBE_DESCRIPTION", "#Shorts")
+# Use AI (Gemini/Claude) to generate title + description + tags before each upload.
+# If no AI key is configured, falls back to static YOUTUBE_DESCRIPTION.
+YOUTUBE_AI_DESCRIPTION = os.environ.get("YOUTUBE_AI_DESCRIPTION", "true").lower() == "true"
 
 # ---------------------------------------------------------------------------
 # Banner overlay
