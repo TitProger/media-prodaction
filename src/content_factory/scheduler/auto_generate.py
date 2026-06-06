@@ -287,11 +287,12 @@ async def run_once_split() -> str:
     return url
 
 
-# ─── Blog pipeline (single-clip, no banner) ──────────────────────────────────
+# ─── Blog pipeline (single-clip, with optional banner) ───────────────────────
 
 async def run_once_blog() -> str:
     """
-    One blog-video auto-generate cycle (single clip, no banner).
+    One blog-video auto-generate cycle (single clip + optional banner).
+    Picks a random banner from the library if available.
     Returns the YouTube video URL on success.
     Raises RuntimeError with a human-readable reason if skipped.
     """
@@ -312,29 +313,42 @@ async def run_once_blog() -> str:
 
     logger.info("[cron/blog] clip=%s", blog_clip["name"])
 
-    # 2. Generate subtitles + compose (no banner)
+    # 2. Pick banner (optional — blog works fine without one)
+    banners = [
+        *list_files(WEB_USER_ID, "banner_image"),
+        *list_files(WEB_USER_ID, "banner_video"),
+    ]
+    banner = random.choice(banners) if banners else None
+    if banner:
+        logger.info("[cron/blog] banner=%s", banner["name"])
+    else:
+        logger.info("[cron/blog] no banner found — composing without banner")
+
+    # 3. Generate subtitles + compose
     work_dir = OUTPUT_DIR / f"cron_blog_{uuid.uuid4().hex[:8]}"
     work_dir.mkdir(parents=True, exist_ok=True)
     loop = asyncio.get_running_loop()
 
-    logger.info("[cron/blog] Generating subtitles…")
+    logger.info("[cron/blog] Generating subtitles...")
     ass_path = await loop.run_in_executor(
         None, generate_subtitles, blog_clip["file_path"], work_dir
     )
 
-    logger.info("[cron/blog] Composing video…")
+    logger.info("[cron/blog] Composing video...")
     output_path = work_dir / "output.mp4"
+    banner_path = banner["file_path"] if banner else None
     await loop.run_in_executor(
         None,
         lambda: compose_single(
             video=blog_clip["file_path"],
             subtitle_file=ass_path,
             output_path=output_path,
-            banner_image=None,
+            banner_image=banner_path,
+            banner_animation=BANNER_ANIMATION,
         ),
     )
 
-    # 3. Build metadata
+    # 4. Build metadata
     static_tags = [t.strip() for t in YOUTUBE_TAGS.split(",") if t.strip()]
     if YOUTUBE_AI_DESCRIPTION:
         logger.info("[cron/blog] Generating AI metadata for: %s", blog_clip["name"])
@@ -348,7 +362,7 @@ async def run_once_blog() -> str:
 
     logger.info("[cron/blog] Title: %s | Tags: %d", title, len(tags))
 
-    # 4. Upload
+    # 5. Upload
     size_mb = output_path.stat().st_size / 1024 / 1024
     logger.info("[cron/blog] Uploading %.1f MB (privacy=%s)…", size_mb, YOUTUBE_PRIVACY_STATUS)
     try:

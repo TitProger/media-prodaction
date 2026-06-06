@@ -410,6 +410,10 @@ def find_best_clips(video_path: str | Path, category: str = "top_video") -> list
                 min_dur, max_dur + 10,
                 [(c.get("start"), c.get("end")) for c in clips_raw],
             )
+            logger.warning("[clip_finder] Falling back to heuristic mode after AI returned 0 valid clips")
+            heuristic = _find_clips_heuristic(segments, CLIP_COUNT, min_dur, max_dur)
+            logger.info("[clip_finder] Heuristic selected %d clips", len(heuristic))
+            return heuristic
         logger.info("[clip_finder] %d valid clips selected (AI returned %d)", len(valid), len(clips_raw))
         return valid
 
@@ -420,7 +424,7 @@ def find_best_clips(video_path: str | Path, category: str = "top_video") -> list
                 "[clip_finder] AI unavailable (%s) — switching to heuristic mode",
                 err[:120],
             )
-            valid = _find_clips_heuristic(result["segments"], CLIP_COUNT, min_dur, max_dur)
+            valid = _find_clips_heuristic(segments, CLIP_COUNT, min_dur, max_dur)
             logger.info("[clip_finder] Heuristic selected %d clips", len(valid))
             return valid
         raise
