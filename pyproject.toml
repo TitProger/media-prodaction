@@ -12,7 +12,7 @@ dependencies = [
     "gradio>=4.0",
     "ffmpeg-python",
     "srt",
-    "python-telegram-bot>=20.0",
+    "python-telegram-bot[job-queue]>=20.0",
     "python-dotenv",
     "fastapi>=0.110",
     "uvicorn[standard]>=0.29",
