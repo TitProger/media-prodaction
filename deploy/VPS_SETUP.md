@@ -90,3 +90,55 @@ journalctl -u media-factory -f  # логи бота/крона/API
 # во время нарезки в другом окне:
 htop                          # убедиться, что RAM не упирается в лимит
 ```
+
+---
+
+# Авто-деплой через GitHub Actions
+
+После первой ручной установки (выше) обновления катятся автоматически: push в `main`
+→ GitHub по SSH заходит на VPS, делает `git reset --hard origin/main`, ставит зависимости
+и перезапускает сервис. Логика — в [deploy.sh](deploy.sh), workflow — в
+`.github/workflows/deploy.yml`.
+
+### 1. Разрешить деплой-юзеру перезапуск сервиса без пароля
+
+`deploy.sh` вызывает `sudo systemctl restart media-factory`. Чтобы это работало без
+интерактивного пароля, добавь правило sudoers (замени `ubuntu` на своего юзера):
+
+```bash
+echo 'ubuntu ALL=(ALL) NOPASSWD: /bin/systemctl restart media-factory, /bin/systemctl status media-factory' \
+  | sudo tee /etc/sudoers.d/media-factory
+sudo chmod 440 /etc/sudoers.d/media-factory
+```
+
+### 2. Создать отдельный SSH-ключ для деплоя
+
+На своём ПК (или на сервере), без пароля на ключ:
+
+```bash
+ssh-keygen -t ed25519 -f ~/.ssh/mf_deploy -N "" -C "github-actions-deploy"
+# публичный ключ → на сервер, в authorized_keys деплой-юзера:
+ssh-copy-id -i ~/.ssh/mf_deploy.pub ubuntu@SERVER_IP
+# приватный ключ (его содержимое целиком) пойдёт в GitHub Secret VPS_SSH_KEY:
+cat ~/.ssh/mf_deploy
+```
+
+### 3. Добавить секреты в GitHub
+
+Репозиторий → **Settings → Secrets and variables → Actions → New repository secret**:
+
+| Secret | Значение |
+|---|---|
+| `VPS_HOST` | IP сервера |
+| `VPS_USER` | SSH-пользователь (напр. `ubuntu`) |
+| `VPS_SSH_KEY` | содержимое приватного ключа `~/.ssh/mf_deploy` (целиком, включая `-----BEGIN/END-----`) |
+| `VPS_PROJECT_DIR` | путь к проекту, напр. `/home/ubuntu/media-prodaction` |
+| `VPS_PORT` | (необязательно) SSH-порт, если не 22 |
+
+### 4. Включить
+
+Запушить `.github/workflows/deploy.yml` в `main`. Дальше каждый push в `main`
+запускает деплой. Можно и вручную: вкладка **Actions → Deploy to VPS → Run workflow**.
+
+> Секреты (`.env`, `youtube_token.json`, `client_secret.json`) остаются на сервере и
+> **никогда** не передаются через CI — деплой их не трогает (они в `.gitignore`).
