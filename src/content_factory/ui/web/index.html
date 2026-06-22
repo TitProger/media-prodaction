@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="ru" class="dark">
-<!-- ci-deploy-check: 20260622a -->
+<!-- ci-deploy-check: 20260622b -->
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
@@ -266,7 +266,8 @@ tailwind.config = {
         <button onclick="genBack(0)" class="btn btn-ghost btn-sm mt-4">← Назад</button>
       </div>
       <div id="gen-step-2" class="genstep hidden">
-        <p class="text-sm mb-3" style="color:var(--muted)">Баннер</p>
+        <p class="text-sm mb-3" style="color:var(--muted)">Баннер <span style="color:var(--faint)">(необязательно)</span></p>
+        <button onclick="pickGenBanner(null,'без баннера')" class="surface hover-line w-full p-3 text-left text-sm mb-2">— Без баннера —</button>
         <div id="gen-ban-list" class="space-y-2"></div>
         <button onclick="genBack(1)" class="btn btn-ghost btn-sm mt-4">← Назад</button>
       </div>
@@ -277,7 +278,7 @@ tailwind.config = {
           <div class="flex justify-between"><span style="color:var(--faint)">Нижнее</span><span id="confirm-bot" class="font-semibold"></span></div>
           <div class="flex justify-between"><span style="color:var(--faint)">Баннер</span><span id="confirm-ban" class="font-semibold"></span></div>
         </div>
-        <div class="mb-5">
+        <div class="mb-5" id="split-anim-block">
           <div class="eyebrow mb-2">анимация баннера</div>
           <div class="flex gap-2 flex-wrap" id="anim-row-split">
             <button onclick="setAnim('slide_left',this)"  class="anim-btn btn btn-secondary btn-sm" data-anim="slide_left">◀ Слева</button>
@@ -643,9 +644,9 @@ async function loadGenBot(){
 }
 async function loadGenBan(){
   const rows=await api('/ui/api/banners'); const el=$('gen-ban-list'); el.innerHTML='';
-  if(!rows||!rows.length){ el.innerHTML=emptyGen('баннеров'); return; }
-  rows.forEach(r=> el.appendChild(genCard((r.category==='banner_video'?'📹 ':'🖼 ')+r.name,'', ()=>{ state.gen.banId=r.id; state.gen.banName=r.name; goGenStep(3); updateConfirm(); })));
+  (rows||[]).forEach(r=> el.appendChild(genCard((r.category==='banner_video'?'📹 ':'🖼 ')+r.name,'', ()=>pickGenBanner(r.id, r.name))));
 }
+function pickGenBanner(id, name){ state.gen.banId=id; state.gen.banName=name; goGenStep(3); updateConfirm(); }
 function goGenStep(n){
   for(let i=0;i<=3;i++) $('gen-step-'+i).classList.toggle('hidden', i!==n);
   state.gen.step=n; renderRail(n,4);
@@ -655,10 +656,11 @@ function genBack(n){ goGenStep(n); }
 function setAnim(a,btn){ state.gen.anim=a;
   document.querySelectorAll('#anim-row-split .anim-btn').forEach(b=>{ b.classList.toggle('btn-primary',b.dataset.anim===a); b.classList.toggle('btn-secondary',b.dataset.anim!==a); }); }
 function updateConfirm(){ $('confirm-top').textContent=state.gen.topName; $('confirm-bot').textContent=state.gen.botName; $('confirm-ban').textContent=state.gen.banName;
+  $('split-anim-block').style.display = state.gen.banId ? '' : 'none';   // анимация только если есть баннер
   document.querySelectorAll('#anim-row-split .anim-btn').forEach(b=>{ b.classList.toggle('btn-primary',b.dataset.anim===state.gen.anim); b.classList.toggle('btn-secondary',b.dataset.anim!==state.gen.anim); }); }
 async function doGenerate(){
   const {topId,botId,banId,anim}=state.gen;
-  if(!topId||!botId||!banId){ toast('Выберите все источники',false); return; }
+  if(!topId||!botId){ toast('Выберите верхнее и нижнее видео',false); return; }
   try{ await api('/ui/api/jobs/generate',{method:'POST',json:{top_source_id:topId,bottom_source_id:botId,banner_id:banId,banner_animation:anim}});
     toast('Сборка запущена!'); showPage('jobs'); }
   catch(e){ toast('Ошибка: '+e.message,false); }

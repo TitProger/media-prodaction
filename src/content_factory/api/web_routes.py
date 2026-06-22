@@ -287,19 +287,23 @@ async def api_job_generate(body: dict) -> dict:
     """
     top_source_id = int(body.get("top_source_id", 0))
     bottom_source_id = int(body.get("bottom_source_id", 0))
-    banner_id = int(body.get("banner_id", 0))
+    banner_id = body.get("banner_id")  # may be None → split without banner
     animation = body.get("banner_animation", BANNER_ANIMATION)
 
     top_row = get_file(top_source_id, WEB_USER_ID)
     bot_row = get_file(bottom_source_id, WEB_USER_ID)
-    ban_row = get_file(banner_id, WEB_USER_ID)
 
     if top_row is None:
         raise HTTPException(404, "Top source not found")
     if bot_row is None:
         raise HTTPException(404, "Bottom source not found")
-    if ban_row is None:
-        raise HTTPException(404, "Banner not found")
+
+    banner_path = None
+    if banner_id:
+        ban_row = get_file(int(banner_id), WEB_USER_ID)
+        if ban_row is None:
+            raise HTTPException(404, "Banner not found")
+        banner_path = Path(ban_row["file_path"])
 
     # Pick random clips
     top_clip = pick_random_unused_clip(WEB_USER_ID, top_source_id)
@@ -316,7 +320,7 @@ async def api_job_generate(body: dict) -> dict:
         top_clip_id=top_clip["id"],
         top_path=Path(top_clip["file_path"]),
         bottom_path=Path(bot_clip["file_path"]),
-        banner_path=Path(ban_row["file_path"]),
+        banner_path=banner_path,
         banner_animation=animation,
     ))
     return job_store.as_dict(job)
@@ -328,7 +332,7 @@ async def _run_generate(
     top_clip_id: int,
     top_path: Path,
     bottom_path: Path,
-    banner_path: Path,
+    banner_path: Path | None,
     banner_animation: str,
 ) -> None:
     loop = asyncio.get_event_loop()
