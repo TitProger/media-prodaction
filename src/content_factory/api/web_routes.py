@@ -461,6 +461,20 @@ async def _run_single_generate(
             job_store.update(job_id, state="error", error=str(exc), message="Ошибка генерации")
 
 
+# ─── Cron settings (runtime-editable auto-upload config) ─────────────────────
+
+@router.get("/api/cron-settings")
+async def api_cron_get() -> dict:
+    from content_factory.scheduler.auto_generate import get_cron_config
+    return get_cron_config()
+
+
+@router.post("/api/cron-settings")
+async def api_cron_set(body: dict) -> dict:
+    from content_factory.scheduler.auto_generate import set_cron_config
+    return set_cron_config(**body)
+
+
 # ─── Jobs: list / get ────────────────────────────────────────────────────────
 
 @router.get("/api/jobs")

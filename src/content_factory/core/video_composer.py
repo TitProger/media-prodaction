@@ -39,6 +39,17 @@ def _slot_filter(index: int, fit_mode: str) -> str:
     )
 
 
+def _fc_nobanner(subtitle_file, fit_mode):
+    """Split-screen filter with subtitles but no banner overlay."""
+    ap = str(subtitle_file).replace("\\", "/").replace(":", "\\:")
+    return (
+        _slot_filter(0, fit_mode) + ";"
+        + _slot_filter(1, fit_mode) + ";"
+        + "[top][bot]vstack=inputs=2[stacked];"
+        + f"[stacked]subtitles='{ap}'[out]"
+    )
+
+
 def _fc(subtitle_file, banner_appear_at, banner_duration, banner_fade,
         banner_margin_top, banner_margin_left, banner_is_video, fit_mode,
         banner_animation, banner_loop_interval):
@@ -163,25 +174,30 @@ def compose(
         if p and not Path(p).exists():
             raise FileNotFoundError(f"{label} not found on disk: {p}")
 
-    if banner_is_video is None:
-        banner_is_video = Path(banner_image).suffix.lower() in _VIDEO_EXTENSIONS
+    has_banner = banner_image is not None
 
-    fc = _fc(
-        subtitle_file, banner_appear_at, banner_duration, banner_fade,
-        banner_margin_top, banner_margin_left, banner_is_video, fit_mode,
-        banner_animation, banner_loop_interval,
-    )
-
-    # For slide-mode video banners: loop at demuxer level (fast, no frame buffering)
-    banner_input_flags = []
-    if banner_is_video and banner_animation in ("slide_left", "slide_right"):
-        banner_input_flags = ["-stream_loop", "-1"]
+    if has_banner:
+        if banner_is_video is None:
+            banner_is_video = Path(banner_image).suffix.lower() in _VIDEO_EXTENSIONS
+        fc = _fc(
+            subtitle_file, banner_appear_at, banner_duration, banner_fade,
+            banner_margin_top, banner_margin_left, banner_is_video, fit_mode,
+            banner_animation, banner_loop_interval,
+        )
+        # For slide-mode video banners: loop at demuxer level (fast, no frame buffering)
+        banner_input_flags = []
+        if banner_is_video and banner_animation in ("slide_left", "slide_right"):
+            banner_input_flags = ["-stream_loop", "-1"]
+        banner_inputs = [*banner_input_flags, "-i", str(banner_image)]
+    else:
+        fc = _fc_nobanner(subtitle_file, fit_mode)
+        banner_inputs = []
 
     cmd = [
         "ffmpeg", "-y",
         "-i", str(top_video),
         "-i", str(bottom_video),
-        *banner_input_flags, "-i", str(banner_image),
+        *banner_inputs,
         "-filter_complex", fc,
         "-map", "[out]",
         "-map", "0:a",

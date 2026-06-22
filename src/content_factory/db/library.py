@@ -75,12 +75,57 @@ def init_db() -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_user_cat ON media_files(user_id, category)"
         )
+        # Key-value store for runtime settings (cron config, etc.)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS app_settings (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+        """)
         # Migrate first — adds subtype / parent_id / used to existing tables
         _migrate(conn)
         # Indexes on migrated columns come AFTER migration
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_parent ON media_files(parent_id)"
         )
+
+
+# ─── Key-value settings store ────────────────────────────────────────────────
+
+def _ensure_settings(conn: sqlite3.Connection) -> None:
+    """Create app_settings on demand so callers never hit a missing table
+    (the table may not exist yet on a DB created by an older version)."""
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+    )
+
+
+def get_setting(key: str, default: str | None = None) -> str | None:
+    with _connect() as conn:
+        _ensure_settings(conn)
+        row = conn.execute(
+            "SELECT value FROM app_settings WHERE key = ?", (key,)
+        ).fetchone()
+    return row["value"] if row else default
+
+
+def set_setting(key: str, value: str) -> None:
+    with _connect() as conn:
+        _ensure_settings(conn)
+        conn.execute(
+            "INSERT INTO app_settings(key, value) VALUES(?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, str(value)),
+        )
+
+
+def get_settings(prefix: str = "") -> dict[str, str]:
+    with _connect() as conn:
+        _ensure_settings(conn)
+        rows = conn.execute(
+            "SELECT key, value FROM app_settings WHERE key LIKE ?", (prefix + "%",)
+        ).fetchall()
+    return {r["key"]: r["value"] for r in rows}
 
 
 def _migrate(conn: sqlite3.Connection) -> None:

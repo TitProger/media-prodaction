@@ -55,15 +55,100 @@ from content_factory.config.settings import (
 )
 from content_factory.db.library import (
     count_unused_clips,
+    get_setting,
+    get_settings,
+    init_db,
     list_files,
     list_sources,
     mark_used,
     pick_random_clip,
     pick_random_unused_clip,
     release_clip,
+    set_setting,
 )
 
 logger = logging.getLogger(__name__)
+
+
+# ─── Cron configuration (runtime-editable, stored in DB) ──────────────────────
+# Editable from the Telegram bot and the web UI; the cron tick reads it fresh
+# each run, so changes apply without restart and from any process.
+
+CRON_DEFAULTS = {
+    "cron_enabled":        "1",                              # master on/off
+    "cron_mode":           "both",                           # blog | split | both
+    "cron_banner":         "with",                           # with | without | both
+    "cron_count":          "1",                              # videos per cycle
+    "cron_interval_hours": str(YOUTUBE_CRON_INTERVAL_HOURS), # how often
+    "cron_window_from":    "0",                              # daily window start hour (0-23)
+    "cron_window_to":      "0",                              # end hour; from==to → 24/7
+    "cron_privacy":        YOUTUBE_PRIVACY_STATUS,           # private|unlisted|public
+}
+
+_MODES = ("blog", "split", "both")
+_BANNERS = ("with", "without", "both")
+_PRIVACIES = ("private", "unlisted", "public")
+
+
+def get_cron_config() -> dict:
+    """Read cron settings from DB, falling back to defaults."""
+    raw = get_settings("cron_")
+    g = lambda k: raw.get(k, CRON_DEFAULTS[k])
+    try:
+        count = max(1, int(g("cron_count")))
+    except (TypeError, ValueError):
+        count = 1
+    try:
+        interval = max(0.0, float(g("cron_interval_hours")))
+    except (TypeError, ValueError):
+        interval = YOUTUBE_CRON_INTERVAL_HOURS
+    return {
+        "enabled":        g("cron_enabled") == "1",
+        "mode":           g("cron_mode") if g("cron_mode") in _MODES else "both",
+        "banner":         g("cron_banner") if g("cron_banner") in _BANNERS else "with",
+        "count":          count,
+        "interval_hours": interval,
+        "window_from":    int(g("cron_window_from") or 0) % 24,
+        "window_to":      int(g("cron_window_to") or 0) % 24,
+        "privacy":        g("cron_privacy") if g("cron_privacy") in _PRIVACIES else "private",
+    }
+
+
+def set_cron_config(**kwargs) -> dict:
+    """Update one or more cron settings. Unknown / None values are ignored."""
+    conv = {
+        "enabled":        ("cron_enabled", lambda v: "1" if v in (True, "1", "true", "on", 1) else "0"),
+        "mode":           ("cron_mode", lambda v: v if v in _MODES else "both"),
+        "banner":         ("cron_banner", lambda v: v if v in _BANNERS else "with"),
+        "count":          ("cron_count", lambda v: str(max(1, int(v)))),
+        "interval_hours": ("cron_interval_hours", lambda v: str(max(0.0, float(v)))),
+        "window_from":    ("cron_window_from", lambda v: str(int(v) % 24)),
+        "window_to":      ("cron_window_to", lambda v: str(int(v) % 24)),
+        "privacy":        ("cron_privacy", lambda v: v if v in _PRIVACIES else "private"),
+    }
+    for k, val in kwargs.items():
+        if k in conv and val is not None:
+            key, fn = conv[k]
+            try:
+                set_setting(key, fn(val))
+            except (TypeError, ValueError):
+                pass
+    return get_cron_config()
+
+
+def _resolve_banner(banner_pref: str):
+    """Pick a banner row (or None) according to the banner preference."""
+    if banner_pref == "without":
+        return None
+    banners = [
+        *list_files(WEB_USER_ID, "banner_image"),
+        *list_files(WEB_USER_ID, "banner_video"),
+    ]
+    if not banners:
+        return None
+    if banner_pref == "both":
+        return random.choice(banners) if random.choice([True, False]) else None
+    return random.choice(banners)  # "with"
 
 
 # ─── AI meta generation ───────────────────────────────────────────────────────
@@ -172,9 +257,10 @@ def _generate_meta(clip_title: str, mode: str = "split") -> dict:
 
 # ─── Split-screen pipeline ────────────────────────────────────────────────────
 
-async def run_once_split() -> str:
+async def run_once_split(banner_pref: str = "with", privacy: str = YOUTUBE_PRIVACY_STATUS) -> str:
     """
     One split-screen auto-generate cycle.
+    banner_pref: with | without | both (without → no banner overlay).
     Returns the YouTube video URL on success.
     Raises RuntimeError with a human-readable reason if skipped.
     """
@@ -204,19 +290,13 @@ async def run_once_split() -> str:
     if bot_clip is None:
         raise RuntimeError("No bottom clip found")
 
-    # 3. Pick banner
-    banners = [
-        *list_files(WEB_USER_ID, "banner_image"),
-        *list_files(WEB_USER_ID, "banner_video"),
-    ]
-    if not banners:
-        raise RuntimeError("No banners — upload at least one banner")
-
-    banner = random.choice(banners)
+    # 3. Pick banner per preference (may be None → split without banner)
+    banner = _resolve_banner(banner_pref)
+    banner_path = banner["file_path"] if banner else None
 
     logger.info(
         "[cron/split] top=%s | bottom=%s | banner=%s",
-        top_clip["name"], bot_clip["name"], banner["name"],
+        top_clip["name"], bot_clip["name"], banner["name"] if banner else "—",
     )
 
     # 4. Generate subtitles + compose
@@ -236,7 +316,7 @@ async def run_once_split() -> str:
         lambda: compose(
             top_clip["file_path"],
             bot_clip["file_path"],
-            banner["file_path"],
+            banner_path,
             ass_path,
             output_path,
             banner_animation=BANNER_ANIMATION,
@@ -259,7 +339,7 @@ async def run_once_split() -> str:
 
     # 6. Upload
     size_mb = output_path.stat().st_size / 1024 / 1024
-    logger.info("[cron/split] Uploading %.1f MB (privacy=%s)…", size_mb, YOUTUBE_PRIVACY_STATUS)
+    logger.info("[cron/split] Uploading %.1f MB (privacy=%s)…", size_mb, privacy)
     try:
         video_id = await loop.run_in_executor(
             None,
@@ -267,7 +347,7 @@ async def run_once_split() -> str:
                 output_path, title,
                 description=description,
                 tags=tags,
-                privacy=YOUTUBE_PRIVACY_STATUS,
+                privacy=privacy,
                 client_secret_path=YOUTUBE_CLIENT_SECRET,
                 token_path=YOUTUBE_TOKEN_FILE,
             ),
@@ -290,10 +370,10 @@ async def run_once_split() -> str:
 
 # ─── Blog pipeline (single-clip, with optional banner) ───────────────────────
 
-async def run_once_blog() -> str:
+async def run_once_blog(banner_pref: str = "with", privacy: str = YOUTUBE_PRIVACY_STATUS) -> str:
     """
     One blog-video auto-generate cycle (single clip + optional banner).
-    Picks a random banner from the library if available.
+    banner_pref: with | without | both.
     Returns the YouTube video URL on success.
     Raises RuntimeError with a human-readable reason if skipped.
     """
@@ -314,16 +394,9 @@ async def run_once_blog() -> str:
 
     logger.info("[cron/blog] clip=%s", blog_clip["name"])
 
-    # 2. Pick banner (optional — blog works fine without one)
-    banners = [
-        *list_files(WEB_USER_ID, "banner_image"),
-        *list_files(WEB_USER_ID, "banner_video"),
-    ]
-    banner = random.choice(banners) if banners else None
-    if banner:
-        logger.info("[cron/blog] banner=%s", banner["name"])
-    else:
-        logger.info("[cron/blog] no banner found — composing without banner")
+    # 2. Pick banner per preference (may be None)
+    banner = _resolve_banner(banner_pref)
+    logger.info("[cron/blog] banner=%s", banner["name"] if banner else "—")
 
     # 3. Generate subtitles + compose
     work_dir = OUTPUT_DIR / f"cron_blog_{uuid.uuid4().hex[:8]}"
@@ -365,7 +438,7 @@ async def run_once_blog() -> str:
 
     # 5. Upload
     size_mb = output_path.stat().st_size / 1024 / 1024
-    logger.info("[cron/blog] Uploading %.1f MB (privacy=%s)…", size_mb, YOUTUBE_PRIVACY_STATUS)
+    logger.info("[cron/blog] Uploading %.1f MB (privacy=%s)…", size_mb, privacy)
     try:
         video_id = await loop.run_in_executor(
             None,
@@ -373,7 +446,7 @@ async def run_once_blog() -> str:
                 output_path, title,
                 description=description,
                 tags=tags,
-                privacy=YOUTUBE_PRIVACY_STATUS,
+                privacy=privacy,
                 client_secret_path=YOUTUBE_CLIENT_SECRET,
                 token_path=YOUTUBE_TOKEN_FILE,
             ),
@@ -396,10 +469,13 @@ async def run_once_blog() -> str:
 
 # ─── Unified cron entry point ─────────────────────────────────────────────────
 
-async def run_once() -> str:
+async def run_once(mode_pref: str = "both", banner_pref: str = "with",
+                   privacy: str = YOUTUBE_PRIVACY_STATUS) -> str:
     """
-    Run one auto-generate cycle — randomly picks split-screen or blog mode
-    based on what clips are available.
+    Run one auto-generate cycle.
+    mode_pref:   blog | split | both (both → random among available).
+    banner_pref: with | without | both.
+    Returns the YouTube video URL on success.
     """
     from content_factory.core.youtube_uploader import is_authenticated
 
@@ -415,23 +491,25 @@ async def run_once() -> str:
     top_sources   = list_sources(WEB_USER_ID, "top_video")
     split_available = any(count_unused_clips(WEB_USER_ID, s["id"]) > 0 for s in top_sources)
 
-    if not blog_available and not split_available:
-        raise RuntimeError("No unused clips in any category — upload & cut new videos")
+    # Candidate modes = allowed by preference AND with available clips
+    candidates = []
+    if mode_pref in ("blog", "both") and blog_available:
+        candidates.append("blog")
+    if mode_pref in ("split", "both") and split_available:
+        candidates.append("split")
 
-    # Choose mode
-    if blog_available and split_available:
-        mode = random.choice(["blog", "split"])
-    elif blog_available:
-        mode = "blog"
-    else:
-        mode = "split"
+    if not candidates:
+        raise RuntimeError(
+            f"No unused clips for mode '{mode_pref}' — upload & cut new videos"
+        )
 
-    logger.info("[cron] Selected mode: %s", mode)
+    mode = random.choice(candidates)
+    logger.info("[cron] Selected mode: %s (pref=%s, banner=%s)", mode, mode_pref, banner_pref)
 
     if mode == "blog":
-        return await run_once_blog()
+        return await run_once_blog(banner_pref=banner_pref, privacy=privacy)
     else:
-        return await run_once_split()
+        return await run_once_split(banner_pref=banner_pref, privacy=privacy)
 
 
 async def weekly_reset_used(context) -> None:
@@ -455,45 +533,89 @@ async def hourly_backup_db(context) -> None:
     logger.info("[cron] DB backup → %s (%d KB)", backup.name, size_kb)
 
 
-async def cron_job(context) -> None:
-    """Entry point for python-telegram-bot JobQueue."""
-    try:
-        url = await run_once()
-        logger.info("[cron] Cycle complete: %s", url)
-        if context.job.data and context.job.data.get("chat_id"):
-            await context.bot.send_message(
-                context.job.data["chat_id"],
-                f"🤖 Авто-шортс загружен!\n{url}",
+def _within_window(cfg: dict) -> bool:
+    """True if the current local hour is inside the daily upload window."""
+    wf, wt = cfg["window_from"], cfg["window_to"]
+    if wf == wt:
+        return True  # 24/7
+    hour = time.localtime().tm_hour
+    return wf <= hour < wt if wf < wt else (hour >= wf or hour < wt)
+
+
+async def cron_tick(context) -> None:
+    """
+    Runs every 60 s. Reads the runtime cron config from the DB and, when due
+    (enabled + interval elapsed + inside daily window), uploads `count` shorts.
+    Config is read fresh each tick, so changes from bot/UI apply immediately.
+    """
+    cfg = get_cron_config()
+    if not cfg["enabled"] or cfg["interval_hours"] <= 0:
+        return
+    if not _within_window(cfg):
+        return
+
+    now = time.time()
+    last = float(get_setting("cron_last_run", "0") or 0)
+    if now - last < cfg["interval_hours"] * 3600:
+        return
+
+    # Mark immediately so the next tick (or a parallel process) won't double-fire.
+    set_setting("cron_last_run", str(now))
+    logger.info("[cron] Due — uploading up to %d (mode=%s banner=%s)",
+                cfg["count"], cfg["mode"], cfg["banner"])
+
+    uploaded: list[str] = []
+    for i in range(cfg["count"]):
+        try:
+            url = await run_once(
+                mode_pref=cfg["mode"], banner_pref=cfg["banner"], privacy=cfg["privacy"],
             )
-    except RuntimeError as exc:
-        logger.warning("[cron] Skipped: %s", exc)
-    except Exception as exc:
-        logger.error("[cron] Failed: %s", exc, exc_info=True)
+            uploaded.append(url)
+        except RuntimeError as exc:
+            logger.warning("[cron] Stopped after %d/%d: %s", i, cfg["count"], exc)
+            break
+        except Exception as exc:
+            logger.error("[cron] Failed: %s", exc, exc_info=True)
+            break
+
+    if uploaded and context.job.data and context.job.data.get("chat_id"):
+        await context.bot.send_message(
+            context.job.data["chat_id"],
+            f"🤖 Авто-загрузка: {len(uploaded)} шортс(ов)\n" + "\n".join(uploaded),
+        )
+
+
+# Backwards-compatible alias (older imports / manual triggers)
+cron_job = cron_tick
 
 
 def register(app, notify_chat_id: int | None = None) -> None:
-    """Register the cron job with the bot's JobQueue."""
+    """Register the cron tick + maintenance jobs with the bot's JobQueue."""
+    init_db()  # ensure app_settings table exists
+
+    # Seed last-run baseline so the first auto-upload happens one interval AFTER
+    # launch, not immediately on startup (avoids a surprise upload on every run).
+    if get_setting("cron_last_run") is None:
+        set_setting("cron_last_run", str(time.time()))
+
     if not YOUTUBE_CLIENT_SECRET:
         logger.info("[cron] YOUTUBE_CLIENT_SECRET not set — auto-upload disabled")
-        return
-
-    if YOUTUBE_CRON_INTERVAL_HOURS <= 0:
-        logger.info("[cron] YOUTUBE_CRON_INTERVAL_HOURS=0 — auto-upload disabled")
-        return
-
-    interval = YOUTUBE_CRON_INTERVAL_HOURS * 3600
-    app.job_queue.run_repeating(
-        cron_job,
-        interval=interval,
-        first=60,
-        name="auto_generate",
-        data={"chat_id": notify_chat_id},
-    )
-    logger.info(
-        "[cron] Auto-upload scheduled every %.1f h (privacy=%s)",
-        YOUTUBE_CRON_INTERVAL_HOURS,
-        YOUTUBE_PRIVACY_STATUS,
-    )
+    else:
+        # A lightweight 60 s tick reads the runtime config from the DB and
+        # decides when/what to upload. Interval/mode/banner/count are all
+        # editable at runtime from the bot and web UI.
+        app.job_queue.run_repeating(
+            cron_tick,
+            interval=60,
+            first=30,
+            name="auto_generate",
+            data={"chat_id": notify_chat_id},
+        )
+        cfg = get_cron_config()
+        logger.info(
+            "[cron] Tick every 60s | enabled=%s mode=%s banner=%s count=%d interval=%.2fh",
+            cfg["enabled"], cfg["mode"], cfg["banner"], cfg["count"], cfg["interval_hours"],
+        )
 
     # Hourly DB backup
     app.job_queue.run_repeating(

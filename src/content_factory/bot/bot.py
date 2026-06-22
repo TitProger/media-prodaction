@@ -117,6 +117,63 @@ def _kb_main() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🎬 Сплит-экран шортс",  callback_data="menu:create")],
         [InlineKeyboardButton("📱 Один клип (блог)",   callback_data="menu:single")],
         [InlineKeyboardButton("📚 Библиотека медиа",   callback_data="menu:library")],
+        [InlineKeyboardButton("⏱ Автопостинг (крон)", callback_data="menu:cron")],
+    ])
+
+
+# ─── Cron settings menu ──────────────────────────────────────────────────────
+
+def _cron_text(cfg: dict) -> str:
+    mode = {"blog": "одиночные", "split": "сдвоенные", "both": "одиночные и сдвоенные"}[cfg["mode"]]
+    ban  = {"with": "с баннером", "without": "без баннера", "both": "баннер случайно"}[cfg["banner"]]
+    win  = "круглосуточно" if cfg["window_from"] == cfg["window_to"] \
+        else f"с {cfg['window_from']}:00 до {cfg['window_to']}:00"
+    state = "🟢 включена" if cfg["enabled"] else "🔴 выключена"
+    return (
+        "⏱ <b>Автопостинг на YouTube</b>\n\n"
+        f"Статус: {state}\n"
+        f"Каждые <b>{cfg['interval_hours']}</b> ч по <b>{cfg['count']}</b> видео\n"
+        f"Тип: <b>{mode}</b> · Баннер: <b>{ban}</b>\n"
+        f"Время: <b>{win}</b> · Приватность: <b>{cfg['privacy']}</b>\n\n"
+        "Нажимай кнопки, чтобы менять (применяется сразу):"
+    )
+
+
+def _kb_cron(cfg: dict) -> InlineKeyboardMarkup:
+    def m(active: bool, label: str) -> str:
+        return ("✅ " if active else "") + label
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(
+            "🟢 Включено — выключить" if cfg["enabled"] else "🔴 Выключено — включить",
+            callback_data="cron:enabled:toggle")],
+        [
+            InlineKeyboardButton(m(cfg["mode"] == "blog", "Одиночные"),  callback_data="cron:mode:blog"),
+            InlineKeyboardButton(m(cfg["mode"] == "split", "Сдвоенные"), callback_data="cron:mode:split"),
+            InlineKeyboardButton(m(cfg["mode"] == "both", "Оба"),        callback_data="cron:mode:both"),
+        ],
+        [
+            InlineKeyboardButton(m(cfg["banner"] == "with", "С баннером"),  callback_data="cron:banner:with"),
+            InlineKeyboardButton(m(cfg["banner"] == "without", "Без"),      callback_data="cron:banner:without"),
+            InlineKeyboardButton(m(cfg["banner"] == "both", "Случайно"),    callback_data="cron:banner:both"),
+        ],
+        [
+            InlineKeyboardButton("➖", callback_data="cron:count:dec"),
+            InlineKeyboardButton(f"Кол-во: {cfg['count']}", callback_data="cron:noop:0"),
+            InlineKeyboardButton("➕", callback_data="cron:count:inc"),
+        ],
+        [InlineKeyboardButton(m(abs(cfg["interval_hours"] - h) < 1e-6, f"{h}ч"),
+                              callback_data=f"cron:interval:{h}") for h in (1, 3, 6, 12, 24)],
+        [
+            InlineKeyboardButton(m(cfg["window_from"] == cfg["window_to"], "24/7"),                 callback_data="cron:window:24_7"),
+            InlineKeyboardButton(m(cfg["window_from"] == 8 and cfg["window_to"] == 22, "8–22"),     callback_data="cron:window:8_22"),
+            InlineKeyboardButton(m(cfg["window_from"] == 10 and cfg["window_to"] == 20, "10–20"),   callback_data="cron:window:10_20"),
+        ],
+        [
+            InlineKeyboardButton(m(cfg["privacy"] == "private", "Скрытое"),   callback_data="cron:privacy:private"),
+            InlineKeyboardButton(m(cfg["privacy"] == "unlisted", "По ссылке"), callback_data="cron:privacy:unlisted"),
+            InlineKeyboardButton(m(cfg["privacy"] == "public", "Публичное"),   callback_data="cron:privacy:public"),
+        ],
+        [InlineKeyboardButton("⬅️ Главное меню", callback_data="menu:main")],
     ])
 
 
@@ -469,6 +526,50 @@ async def cb_menu_main(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await q.answer()
     _clear_state(context.user_data)
     await q.edit_message_text("👋 Главное меню:", reply_markup=_kb_main())
+
+
+# ─── Callback: cron settings ─────────────────────────────────────────────────
+
+async def _render_cron(q) -> None:
+    from content_factory.scheduler.auto_generate import get_cron_config
+    cfg = get_cron_config()
+    try:
+        await q.edit_message_text(_cron_text(cfg), parse_mode=H, reply_markup=_kb_cron(cfg))
+    except Exception:
+        pass  # ignore "message is not modified" when tapping an already-active option
+
+
+async def cb_menu_cron(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    q = update.callback_query
+    await q.answer()
+    await _render_cron(q)
+
+
+async def cb_cron_set(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    from content_factory.scheduler.auto_generate import get_cron_config, set_cron_config
+    q = update.callback_query
+    _, key, val = q.data.split(":", 2)
+
+    if key == "noop":
+        await q.answer()
+        return
+    if key == "enabled":
+        set_cron_config(enabled=not get_cron_config()["enabled"])
+    elif key == "count":
+        cur = get_cron_config()["count"]
+        n = cur + 1 if val == "inc" else cur - 1
+        set_cron_config(count=max(1, min(50, n)))
+    elif key == "interval":
+        set_cron_config(interval_hours=float(val))
+    elif key == "window":
+        wmap = {"24_7": (0, 0), "8_22": (8, 22), "10_20": (10, 20)}
+        wf, wt = wmap.get(val, (0, 0))
+        set_cron_config(window_from=wf, window_to=wt)
+    elif key in ("mode", "banner", "privacy"):
+        set_cron_config(**{key: val})
+
+    await q.answer("✅ Сохранено")
+    await _render_cron(q)
 
 
 # ─── Callback: library menu ──────────────────────────────────────────────────
@@ -1382,6 +1483,8 @@ def build_bot(notify_chat_id: int | None = None) -> Application:
     app.add_handler(CallbackQueryHandler(cb_menu_main,        pattern=r"^menu:main$"))
     app.add_handler(CallbackQueryHandler(cb_menu_library,     pattern=r"^menu:library$"))
     app.add_handler(CallbackQueryHandler(cb_menu_create,      pattern=r"^menu:create$"))
+    app.add_handler(CallbackQueryHandler(cb_menu_cron,        pattern=r"^menu:cron$"))
+    app.add_handler(CallbackQueryHandler(cb_cron_set,         pattern=r"^cron:[a-z_]+:[a-z0-9_.]+$"))
     app.add_handler(CallbackQueryHandler(cb_lib_category,     pattern=r"^lib:[a-z_]+$"))
     app.add_handler(CallbackQueryHandler(cb_lib_del_src,      pattern=r"^lib_del_src:\d+:[a-z_]+$"))
     app.add_handler(CallbackQueryHandler(cb_lib_clips,        pattern=r"^lib_clips:\d+:[a-z_]+$"))

@@ -74,6 +74,14 @@ tailwind.config = {
   .seg-btn.on .dot{ background:var(--signal); }
   .dot{ width:.45rem;height:.45rem;border-radius:50%;background:var(--faint); }
 
+  /* toggle switch */
+  .toggle{ width:2.6rem;height:1.5rem;border-radius:999px;background:var(--line);position:relative;
+           cursor:pointer;transition:background .15s;flex-shrink:0;border:none;padding:0; }
+  .toggle.on{ background:var(--signal); }
+  .toggle .knob{ position:absolute;top:3px;left:3px;width:1.05rem;height:1.05rem;border-radius:50%;
+                 background:#fff;transition:left .15s; }
+  .toggle.on .knob{ left:1.25rem; }
+
   /* badges */
   .chip{ font-family:var(--mono);font-size:.68rem;border-radius:.4rem;padding:.12rem .45rem;
          border:1px solid transparent; }
@@ -182,6 +190,7 @@ tailwind.config = {
     <span class="nav-num">03</span><span>⚡ Очередь</span>
     <span id="jobs-badge" class="ml-auto mono hidden text-xs rounded-full px-1.5" style="background:var(--render);color:#08121c"></span>
   </button>
+  <button onclick="showPage('cron')"     class="nav-btn" data-page="cron"><span class="nav-num">04</span><span>⏱ Автопостинг</span></button>
   <div class="mt-auto pt-4 eyebrow px-1" style="color:var(--faint)">9 : 16 · shorts / reels</div>
 </nav>
 
@@ -328,14 +337,87 @@ tailwind.config = {
     <div id="jobs-list" class="space-y-3"></div>
   </div>
 
+  <!-- CRON / AUTO-POSTING -->
+  <div id="page-cron" class="page hidden p-4 md:p-7 max-w-2xl mx-auto">
+    <div class="eyebrow">этап 04</div>
+    <h1 class="disp text-2xl font-bold mt-1 mb-1">Автопостинг на YouTube</h1>
+    <p class="text-sm mb-5" style="color:var(--muted)">Крон сам собирает и заливает шортсы по этим правилам. Изменения применяются сразу.</p>
+
+    <div class="surface p-5 space-y-5">
+      <!-- enabled -->
+      <div class="flex items-center justify-between gap-3">
+        <div><div class="font-semibold text-sm">Автозаливка включена</div>
+          <div class="eyebrow mt-0.5">мастер-переключатель</div></div>
+        <button id="cron-enabled" onclick="cronToggle()" class="toggle" role="switch"><span class="knob"></span></button>
+      </div>
+      <div class="h-px" style="background:var(--line)"></div>
+
+      <!-- mode -->
+      <div>
+        <div class="font-semibold text-sm mb-2">Тип видео</div>
+        <div class="seg w-full" id="cron-mode">
+          <button onclick="cronSet('mode','blog',this)"  class="seg-btn flex-1 justify-center" data-v="blog">Одиночные</button>
+          <button onclick="cronSet('mode','split',this)" class="seg-btn flex-1 justify-center" data-v="split">Сдвоенные</button>
+          <button onclick="cronSet('mode','both',this)"  class="seg-btn flex-1 justify-center" data-v="both">И&nbsp;то,&nbsp;и&nbsp;то</button>
+        </div>
+      </div>
+
+      <!-- banner -->
+      <div>
+        <div class="font-semibold text-sm mb-2">Баннер</div>
+        <div class="seg w-full" id="cron-banner">
+          <button onclick="cronSet('banner','with',this)"    class="seg-btn flex-1 justify-center" data-v="with">С&nbsp;баннером</button>
+          <button onclick="cronSet('banner','without',this)" class="seg-btn flex-1 justify-center" data-v="without">Без</button>
+          <button onclick="cronSet('banner','both',this)"    class="seg-btn flex-1 justify-center" data-v="both">Случайно</button>
+        </div>
+      </div>
+
+      <!-- numbers -->
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <div class="font-semibold text-sm mb-2">Видео за цикл</div>
+          <input id="cron-count" type="number" min="1" max="50" class="input" onchange="cronSet('count',this.value)"/>
+        </div>
+        <div>
+          <div class="font-semibold text-sm mb-2">Интервал (часы)</div>
+          <input id="cron-interval" type="number" min="0.1" step="0.1" class="input" onchange="cronSet('interval_hours',this.value)"/>
+        </div>
+      </div>
+
+      <!-- daily window -->
+      <div>
+        <div class="font-semibold text-sm mb-2">Окно времени (часы суток)</div>
+        <div class="flex items-center gap-2">
+          <input id="cron-from" type="number" min="0" max="23" class="input" style="width:5rem" onchange="cronSet('window_from',this.value)"/>
+          <span style="color:var(--faint)">—</span>
+          <input id="cron-to" type="number" min="0" max="23" class="input" style="width:5rem" onchange="cronSet('window_to',this.value)"/>
+          <span class="eyebrow">одинаковые = круглосуточно</span>
+        </div>
+      </div>
+
+      <!-- privacy -->
+      <div>
+        <div class="font-semibold text-sm mb-2">Приватность</div>
+        <div class="seg w-full" id="cron-privacy">
+          <button onclick="cronSet('privacy','private',this)"  class="seg-btn flex-1 justify-center" data-v="private">Скрытое</button>
+          <button onclick="cronSet('privacy','unlisted',this)" class="seg-btn flex-1 justify-center" data-v="unlisted">По&nbsp;ссылке</button>
+          <button onclick="cronSet('privacy','public',this)"   class="seg-btn flex-1 justify-center" data-v="public">Публичное</button>
+        </div>
+      </div>
+    </div>
+
+    <p id="cron-summary" class="text-xs mt-3" style="color:var(--faint)"></p>
+  </div>
+
 </div>
 
 <!-- ── Bottom nav (mobile) ── -->
 <nav id="bottom-nav" class="fixed bottom-0 left-0 right-0 border-t flex justify-around py-2 z-50"
      style="border-color:var(--line);background:#0c1014ee;backdrop-filter:blur(10px);padding-bottom:max(.5rem,env(safe-area-inset-bottom))">
-  <button onclick="showPage('library')"  class="mob-nav flex flex-col items-center gap-0.5 text-[.66rem] font-semibold px-5 py-1" data-page="library"><span class="text-lg">📚</span>Материалы</button>
-  <button onclick="showPage('generate')" class="mob-nav flex flex-col items-center gap-0.5 text-[.66rem] font-semibold px-5 py-1" data-page="generate"><span class="text-lg">🎬</span>Сборка</button>
-  <button onclick="showPage('jobs')"     class="mob-nav flex flex-col items-center gap-0.5 text-[.66rem] font-semibold px-5 py-1" data-page="jobs"><span class="text-lg">⚡</span>Очередь</button>
+  <button onclick="showPage('library')"  class="mob-nav flex flex-col items-center gap-0.5 text-[.62rem] font-semibold px-3 py-1" data-page="library"><span class="text-lg">📚</span>Материалы</button>
+  <button onclick="showPage('generate')" class="mob-nav flex flex-col items-center gap-0.5 text-[.62rem] font-semibold px-3 py-1" data-page="generate"><span class="text-lg">🎬</span>Сборка</button>
+  <button onclick="showPage('jobs')"     class="mob-nav flex flex-col items-center gap-0.5 text-[.62rem] font-semibold px-3 py-1" data-page="jobs"><span class="text-lg">⚡</span>Очередь</button>
+  <button onclick="showPage('cron')"     class="mob-nav flex flex-col items-center gap-0.5 text-[.62rem] font-semibold px-3 py-1" data-page="cron"><span class="text-lg">⏱</span>Автопост</button>
 </nav>
 
 <!-- viewfinder modal -->
@@ -377,6 +459,7 @@ function showPage(name){
   });
   if(name==='library') loadSources();
   if(name==='generate') initGenerate();
+  if(name==='cron') loadCron();
   if(name==='jobs'){ loadJobs(); startJobPoll(); } else stopJobPoll();
 }
 
@@ -684,6 +767,38 @@ async function api(url, opts={}){
 }
 function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function jstr(s){ return "'"+String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/</g,'\\u003c')+"'"; }
+
+// ─── Cron / auto-posting settings ───────────────────────────────────────────────
+let _cronCfg = {};
+async function loadCron(){
+  try { _cronCfg = await api('/ui/api/cron-settings'); renderCron(); }
+  catch(e){ toast('Не удалось загрузить настройки: '+e.message, false); }
+}
+function setSeg(id, val){
+  document.querySelectorAll('#'+id+' [data-v]').forEach(b => b.classList.toggle('on', b.dataset.v===String(val)));
+}
+function renderCron(){
+  const c=_cronCfg;
+  $('cron-enabled').classList.toggle('on', !!c.enabled);
+  setSeg('cron-mode', c.mode);
+  setSeg('cron-banner', c.banner);
+  setSeg('cron-privacy', c.privacy);
+  $('cron-count').value = c.count;
+  $('cron-interval').value = c.interval_hours;
+  $('cron-from').value = c.window_from;
+  $('cron-to').value = c.window_to;
+  const modeTxt={blog:'одиночные',split:'сдвоенные',both:'одиночные и сдвоенные'}[c.mode]||c.mode;
+  const banTxt={with:'с баннером',without:'без баннера',both:'баннер случайно'}[c.banner]||c.banner;
+  const win = c.window_from===c.window_to ? 'круглосуточно' : `с ${c.window_from}:00 до ${c.window_to}:00`;
+  $('cron-summary').textContent = c.enabled
+    ? `▶ Каждые ${c.interval_hours} ч заливать ${c.count} видео (${modeTxt}, ${banTxt}), ${win}, приватность: ${c.privacy}.`
+    : '⏸ Автозаливка выключена.';
+}
+async function cronSet(key, val){
+  try { _cronCfg = await api('/ui/api/cron-settings', {method:'POST', json:{[key]: val}}); renderCron(); toast('Сохранено'); }
+  catch(e){ toast('Ошибка: '+e.message, false); }
+}
+function cronToggle(){ cronSet('enabled', !_cronCfg.enabled); }
 
 // ─── Init ──────────────────────────────────────────────────────────────────────
 showPage('library');
