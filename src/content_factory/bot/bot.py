@@ -836,7 +836,16 @@ async def _lib_recv_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     dest = storage_dir / f"{uuid.uuid4().hex}{ext}"
     await msg.reply_text("⏬ Скачиваю файл…")
-    await fo.download_to_drive(dest)
+    try:
+        await fo.download_to_drive(dest)
+    except Exception as exc:
+        logger.exception("[bot] file download failed")
+        _clear_state(context.user_data)
+        await msg.reply_text(
+            f"❌ Не удалось скачать файл: {_e(str(exc)[:200])}\n\nПопробуй ещё раз через меню.",
+            reply_markup=_kb_main(),
+        )
+        return
 
     context.user_data[_LIB_FILE] = str(dest)
     context.user_data[_ST] = "lib_await_name"
@@ -857,7 +866,16 @@ async def _lib_recv_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     file_path = Path(context.user_data[_LIB_FILE])
     label = CATEGORY_LABEL[category]
 
-    add_file(msg.from_user.id, name, category, file_path, subtype="source")
+    try:
+        add_file(msg.from_user.id, name, category, file_path, subtype="source")
+    except Exception as exc:
+        logger.exception("[bot] add_file failed")
+        _clear_state(context.user_data)
+        await msg.reply_text(
+            f"❌ Не удалось сохранить в библиотеку: {_e(str(exc)[:200])}",
+            reply_markup=_kb_main(),
+        )
+        return
     _clear_state(context.user_data)
 
     await msg.reply_text(

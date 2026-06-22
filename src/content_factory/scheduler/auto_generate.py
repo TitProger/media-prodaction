@@ -282,6 +282,7 @@ async def run_once_split() -> str:
         raise
 
     mark_used(top_clip["id"])
+    shutil.rmtree(work_dir, ignore_errors=True)  # free disk — the video is on YouTube now
     url = f"https://youtube.com/shorts/{video_id}"
     logger.info("[cron/split] ✅ Done → %s", url)
     return url
@@ -387,6 +388,7 @@ async def run_once_blog() -> str:
         raise
 
     mark_used(blog_clip["id"])
+    shutil.rmtree(work_dir, ignore_errors=True)  # free disk — the video is on YouTube now
     url = f"https://youtube.com/shorts/{video_id}"
     logger.info("[cron/blog] ✅ Done → %s", url)
     return url

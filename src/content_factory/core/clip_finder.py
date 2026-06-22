@@ -22,8 +22,8 @@ import logging
 import re
 from pathlib import Path
 
-import whisper
-
+from content_factory.core._sync import HEAVY_LOCK
+from content_factory.core.whisper_cache import get_model as _get_whisper
 from content_factory.config.settings import (
     ANTHROPIC_API_KEY,
     BLOG_CLIP_MAX_DURATION,
@@ -44,14 +44,14 @@ from content_factory.config.settings import (
 
 logger = logging.getLogger(__name__)
 
-_whisper_cache: dict = {}
 
-
-def _get_whisper(name: str):
-    if name not in _whisper_cache:
-        logger.info("Loading Whisper model '%s'…", name)
-        _whisper_cache[name] = whisper.load_model(name)
-    return _whisper_cache[name]
+def _file_signature(path: Path, chunk_size: int = 65536) -> str:
+    """MD5 of the file read in chunks — never loads the whole video into RAM."""
+    h = hashlib.md5()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(chunk_size), b""):
+            h.update(chunk)
+    return h.hexdigest()[:12]
 
 
 # ─── Transcript formatting ────────────────────────────────────────────────────
@@ -312,7 +312,7 @@ def find_best_clips(video_path: str | Path, category: str = "top_video") -> list
 
     # ── 1. Transcribe (with disk cache) ──────────────────────────────────────
     cache_file = video_path.with_suffix(".whisper_cache.json")
-    file_hash = hashlib.md5(video_path.read_bytes()).hexdigest()[:12]
+    file_hash = _file_signature(video_path)
 
     if cache_file.exists():
         try:
@@ -330,12 +330,14 @@ def find_best_clips(video_path: str | Path, category: str = "top_video") -> list
     if segments is None:
         logger.info("[clip_finder] Transcribing '%s'…", video_path.name)
         wmodel = _get_whisper(WHISPER_MODEL)
-        result = wmodel.transcribe(
-            str(video_path),
-            language=WHISPER_LANGUAGE,
-            word_timestamps=False,
-            verbose=False,
-        )
+        # Process-wide lock: never run two Whisper transcriptions at once (OOM on 2 GB VPS).
+        with HEAVY_LOCK:
+            result = wmodel.transcribe(
+                str(video_path),
+                language=WHISPER_LANGUAGE,
+                word_timestamps=False,
+                verbose=False,
+            )
         segments = result["segments"]
         try:
             cache_file.write_text(

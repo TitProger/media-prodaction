@@ -12,6 +12,7 @@ from content_factory.config.settings import (
     SINGLE_BANNER_MARGIN_TOP, SINGLE_SUBTITLE_MARGIN_V,
     SPLIT_EQ_ENABLED, VIDEO_EQ_BRIGHTNESS, VIDEO_EQ_CONTRAST, VIDEO_EQ_SATURATION,
 )
+from content_factory.core._sync import HEAVY_LOCK
 
 logger = logging.getLogger(__name__)
 
@@ -192,7 +193,8 @@ def compose(
 
     logger.info("Running FFmpeg… (animation=%s fit_mode=%s)", banner_animation, fit_mode)
     print(f"[FFMPEG] filter_complex:\n{fc}\n", flush=True)
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=FFMPEG_TIMEOUT)  # 15 min max
+    with HEAVY_LOCK:  # serialize heavy encode process-wide (2 GB / 2-core VPS)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=FFMPEG_TIMEOUT)
 
     if result.returncode != 0:
         print(f"[FFMPEG] stderr:\n{result.stderr[-3000:]}", flush=True)
@@ -366,7 +368,8 @@ def compose_single(
 
     logger.info("Running FFmpeg single… (animation=%s banner=%s)", banner_animation, has_banner)
     logger.debug("[FFMPEG] filter_complex:\n%s", fc)
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=FFMPEG_TIMEOUT)
+    with HEAVY_LOCK:  # serialize heavy encode process-wide (2 GB / 2-core VPS)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=FFMPEG_TIMEOUT)
 
     if result.returncode != 0:
         logger.error("[FFMPEG] stderr:\n%s", result.stderr[-3000:])

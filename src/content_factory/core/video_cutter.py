@@ -18,7 +18,7 @@ import re
 import subprocess
 from pathlib import Path
 
-from content_factory.config.settings import OUTPUT_CRF, OUTPUT_PRESET
+from content_factory.config.settings import FFMPEG_TIMEOUT, OUTPUT_CRF, OUTPUT_PRESET
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +86,12 @@ def cut_clips(
             "[video_cutter] Clip %d/%d | %.1fs–%.1fs (%.0fs) → %s",
             i, len(clips), start, clip["end"], duration, out_path.name,
         )
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=FFMPEG_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            # subprocess.run already killed the ffmpeg process before re-raising
+            logger.error("[video_cutter] FFmpeg timed out (%ss) for clip %d — skipping", FFMPEG_TIMEOUT, i)
+            continue
 
         if result.returncode != 0:
             logger.error(
@@ -114,7 +119,7 @@ def _get_duration(path: Path) -> float:
         "-of", "default=noprint_wrappers=1:nokey=1",
         str(path),
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
     if result.returncode != 0:
         raise RuntimeError(f"ffprobe failed: {result.stderr[-800:]}")
     return float(result.stdout.strip())
@@ -180,7 +185,11 @@ def split_by_duration(
             "[video_cutter] Part %d/%d | %.0fs–%.0fs → %s",
             i + 1, n_chunks, start, start + duration, out_path.name,
         )
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=FFMPEG_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            logger.error("[video_cutter] FFmpeg timed out (%ss) for part %d — skipping", FFMPEG_TIMEOUT, i + 1)
+            continue
 
         if result.returncode != 0:
             logger.error(

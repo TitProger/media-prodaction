@@ -1,0 +1,33 @@
+# systemd unit for Content Factory (bot + API + cron together).
+#
+# Install:
+#   sudo cp deploy/media-factory.service /etc/systemd/system/
+#   # edit User / WorkingDirectory / ExecStart paths below to match your server
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now media-factory
+#
+# Logs:    journalctl -u media-factory -f
+# Restart: sudo systemctl restart media-factory
+
+[Unit]
+Description=Content Factory — short-form video pipeline (Telegram bot + API + cron)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/media-prodaction
+# Use the venv python so all deps resolve. Adjust the path to your venv.
+ExecStart=/home/ubuntu/media-prodaction/.venv/bin/python main.py start
+EnvironmentFile=/home/ubuntu/media-prodaction/.env
+Restart=always
+RestartSec=5
+# Restart instead of being OOM-killed silently; also cap memory as a guard.
+# 2 GB box: leave headroom for the OS. Tune if you add swap.
+MemoryMax=1700M
+# FFmpeg + Whisper are CPU-heavy; let them use both cores but stay nice.
+Nice=5
+
+[Install]
+WantedBy=multi-user.target

@@ -19,6 +19,14 @@ from dotenv import load_dotenv
 
 load_dotenv()  # reads .env if present, no-op otherwise
 
+# Ensure emoji / Cyrillic in logs never crash on a cp1251 Windows console.
+# No-op on Linux (already UTF-8).
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8")
+    except (AttributeError, ValueError):
+        pass
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",

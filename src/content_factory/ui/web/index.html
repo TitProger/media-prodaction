@@ -2,177 +2,328 @@
 <html lang="ru" class="dark">
 <head>
 <meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Content Factory</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+<title>Content Factory — монтажный пульт</title>
 <script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Unbounded:wght@600;700;800&display=swap" rel="stylesheet">
 <script>
 tailwind.config = {
   darkMode: 'class',
-  theme: { extend: { colors: { brand: '#f59e0b' } } }
+  theme: { extend: { colors: {
+    brand: '#FF5C38', ink: '#EAEEF3', muted: '#8A95A3',
+    surface: '#161C24', line: '#283039',
+  } } }
 }
 </script>
 <style>
-  body { background: #030712; color: #f9fafb; }
-  .tab-active { color: #f59e0b; border-color: #f59e0b; }
-  .tab-inactive { color: #6b7280; border-color: transparent; }
-  .card { background: #111827; border: 1px solid #1f2937; border-radius: 0.75rem; }
-  .btn { display:inline-flex;align-items:center;justify-content:center;gap:.35rem;
-         padding:.45rem 1rem;border-radius:.5rem;font-size:.85rem;font-weight:500;
-         cursor:pointer;transition:opacity .15s; }
-  .btn:hover { opacity:.85; }
-  .btn-primary { background:#f59e0b;color:#000; }
-  .btn-secondary { background:#1f2937;color:#e5e7eb;border:1px solid #374151; }
-  .btn-danger { background:#7f1d1d;color:#fca5a5;border:1px solid #991b1b; }
-  .btn-sm { padding:.3rem .7rem;font-size:.78rem; }
-  .input { background:#1f2937;border:1px solid #374151;border-radius:.5rem;
-           padding:.45rem .75rem;font-size:.875rem;color:#f9fafb;width:100%; }
-  .input:focus { outline:none;border-color:#f59e0b; }
-  .tag-source { background:#1e3a5f;color:#93c5fd;border-radius:9999px;padding:.1rem .6rem;font-size:.72rem; }
-  .tag-clip { background:#064e3b;color:#6ee7b7;border-radius:9999px;padding:.1rem .6rem;font-size:.72rem; }
-  .badge-unused { background:#78350f;color:#fcd34d;border-radius:9999px;padding:.1rem .6rem;font-size:.72rem; }
-  .progress-bar { height:4px;background:#f59e0b;border-radius:2px;transition:width .3s; }
-  .drop-zone { border:2px dashed #374151;border-radius:.75rem;padding:2rem;text-align:center;
-               cursor:pointer;transition:border-color .15s,background .15s; }
-  .drop-zone.over { border-color:#f59e0b;background:#1c1405; }
-  .step-dot { width:2rem;height:2rem;border-radius:50%;display:flex;align-items:center;justify-content:center;
-              font-size:.8rem;font-weight:700;transition:background .2s; }
-  .step-dot.done { background:#f59e0b;color:#000; }
-  .step-dot.active { background:#1f2937;border:2px solid #f59e0b;color:#f59e0b; }
-  .step-dot.idle { background:#1f2937;border:2px solid #374151;color:#6b7280; }
-  .job-pending { border-left:3px solid #6b7280; }
-  .job-running { border-left:3px solid #f59e0b; }
-  .job-done { border-left:3px solid #10b981; }
-  .job-error { border-left:3px solid #ef4444; }
-  .spinner { width:1rem;height:1rem;border:2px solid #374151;border-top-color:#f59e0b;
-             border-radius:50%;animation:spin .7s linear infinite;display:inline-block; }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  .toast { position:fixed;bottom:1.5rem;right:1.5rem;z-index:9999;
-           background:#1f2937;border:1px solid #374151;border-radius:.6rem;
-           padding:.75rem 1.1rem;font-size:.85rem;max-width:320px;
-           box-shadow:0 4px 24px #0006;animation:slideup .25s ease; }
-  @keyframes slideup { from { opacity:0;transform:translateY(1rem); } to { opacity:1;transform:translateY(0); } }
-  ::-webkit-scrollbar { width:5px; height:5px; }
-  ::-webkit-scrollbar-track { background:transparent; }
-  ::-webkit-scrollbar-thumb { background:#374151;border-radius:3px; }
-  @media(max-width:767px) {
-    #sidebar { display:none; }
-    #bottom-nav { display:flex; }
-    #main-content { padding-bottom:5rem; }
+  :root{
+    --bg:#0E1217; --surface:#161C24; --surface-2:#1E2630; --line:#283039;
+    --ink:#EAEEF3; --muted:#8A95A3; --faint:#5A6573;
+    --signal:#FF5C38; --signal-dim:#3a1d14;
+    --render:#54B8FF; --live:#3DDC97; --warn:#FFC24B; --danger:#FF4D6D;
+    --r:14px;
+    --mono:'JetBrains Mono',ui-monospace,monospace;
+    --disp:'Unbounded',system-ui,sans-serif;
   }
-  @media(min-width:768px) {
-    #sidebar { display:flex; }
-    #bottom-nav { display:none; }
+  *{ -webkit-tap-highlight-color:transparent; }
+  body{ background:var(--bg); color:var(--ink); font-family:'Manrope',system-ui,sans-serif;
+        font-feature-settings:"ss01"; }
+  ::selection{ background:var(--signal); color:#0E1217; }
+  .disp{ font-family:var(--disp); letter-spacing:-.02em; }
+  .mono{ font-family:var(--mono); }
+  .eyebrow{ font-family:var(--mono); font-size:.66rem; letter-spacing:.18em; text-transform:uppercase; color:var(--faint); }
+
+  /* surfaces */
+  .surface{ background:var(--surface); border:1px solid var(--line); border-radius:var(--r); }
+  .surface-2{ background:var(--surface-2); border:1px solid var(--line); border-radius:var(--r); }
+  .hover-line:hover{ border-color:#3a4654; }
+
+  /* buttons */
+  .btn{ display:inline-flex;align-items:center;justify-content:center;gap:.4rem;
+        padding:.5rem 1rem;border-radius:.6rem;font-size:.85rem;font-weight:600;
+        cursor:pointer;transition:transform .08s,background .15s,border-color .15s,opacity .15s;
+        border:1px solid transparent;white-space:nowrap; }
+  .btn:active{ transform:translateY(1px); }
+  .btn:disabled{ opacity:.55;cursor:default; }
+  .btn-primary{ background:var(--signal);color:#160a06; box-shadow:0 0 0 1px #ff5c3833,0 6px 18px -8px #ff5c3899; }
+  .btn-primary:hover{ background:#ff6f4f; }
+  .btn-secondary{ background:var(--surface-2);color:var(--ink);border-color:var(--line); }
+  .btn-secondary:hover{ border-color:#3a4654; }
+  .btn-ghost{ background:transparent;color:var(--muted);border-color:var(--line); }
+  .btn-ghost:hover{ color:var(--ink);border-color:#3a4654; }
+  .btn-danger{ background:transparent;color:var(--danger);border-color:#4a2230; }
+  .btn-danger:hover{ background:#2a131b; }
+  .btn-sm{ padding:.34rem .7rem;font-size:.78rem; }
+  .btn-icon{ padding:.4rem;width:2rem;height:2rem; }
+
+  .input{ background:var(--surface-2);border:1px solid var(--line);border-radius:.6rem;
+          padding:.55rem .8rem;font-size:.9rem;color:var(--ink);width:100%; }
+  .input::placeholder{ color:var(--faint); }
+  .input:focus{ outline:none;border-color:var(--signal); }
+
+  /* category / mode tabs */
+  .seg{ display:inline-flex;gap:.25rem;background:var(--surface);border:1px solid var(--line);
+        border-radius:.7rem;padding:.25rem; }
+  .seg-btn{ display:inline-flex;align-items:center;gap:.4rem;padding:.4rem .8rem;border-radius:.5rem;
+            font-size:.82rem;font-weight:600;color:var(--muted);cursor:pointer;white-space:nowrap;
+            transition:background .15s,color .15s; }
+  .seg-btn:hover{ color:var(--ink); }
+  .seg-btn.on{ background:var(--surface-2);color:var(--ink);box-shadow:inset 0 0 0 1px var(--line); }
+  .seg-btn.on .dot{ background:var(--signal); }
+  .dot{ width:.45rem;height:.45rem;border-radius:50%;background:var(--faint); }
+
+  /* badges */
+  .chip{ font-family:var(--mono);font-size:.68rem;border-radius:.4rem;padding:.12rem .45rem;
+         border:1px solid transparent; }
+  .chip-src{ background:#15212e;color:#7fb6e6;border-color:#1e3346; }
+  .chip-clip{ background:#10241c;color:#5fd6a4;border-color:#193a2d; }
+  .chip-new{ background:var(--signal-dim);color:#ff9275;border-color:#5a2a1b; }
+  .chip-used{ background:#1b212a;color:var(--faint);border-color:var(--line); }
+
+  /* nav (pipeline rail) */
+  .nav-btn{ display:flex;align-items:center;gap:.7rem;width:100%;text-align:left;
+            padding:.6rem .7rem;border-radius:.6rem;font-size:.9rem;font-weight:600;color:var(--muted);
+            border-left:2px solid transparent;transition:background .15s,color .15s; cursor:pointer; }
+  .nav-btn:hover{ color:var(--ink);background:var(--surface); }
+  .nav-btn.on{ color:var(--ink);background:var(--surface);border-left-color:var(--signal); }
+  .nav-num{ font-family:var(--mono);font-size:.7rem;color:var(--faint); }
+  .nav-btn.on .nav-num{ color:var(--signal); }
+
+  /* drop zone */
+  .drop{ border:1.5px dashed var(--line);border-radius:var(--r);padding:1.6rem;text-align:center;
+         cursor:pointer;transition:border-color .15s,background .15s; }
+  .drop:hover{ border-color:#3a4654; }
+  .drop.over{ border-color:var(--signal);background:#180d08; }
+
+  /* step rail */
+  .srail{ display:flex;align-items:center;gap:.5rem; }
+  .sdot{ width:1.9rem;height:1.9rem;border-radius:50%;display:flex;align-items:center;justify-content:center;
+         font-family:var(--mono);font-size:.78rem;font-weight:700;transition:all .2s;flex-shrink:0; }
+  .sdot.done{ background:var(--signal);color:#160a06; }
+  .sdot.active{ background:var(--surface-2);border:2px solid var(--signal);color:var(--signal); }
+  .sdot.idle{ background:var(--surface);border:1px solid var(--line);color:var(--faint); }
+  .sline{ height:2px;flex:1;background:var(--line);border-radius:2px; }
+
+  /* jobs */
+  .job{ border-left:3px solid var(--line); }
+  .job.pending{ border-left-color:var(--faint); }
+  .job.running{ border-left-color:var(--render); }
+  .job.done{ border-left-color:var(--live); }
+  .job.error{ border-left-color:var(--danger); }
+
+  .spinner{ width:1rem;height:1rem;border:2px solid var(--line);border-top-color:var(--render);
+            border-radius:50%;animation:spin .7s linear infinite;display:inline-block;vertical-align:-2px; }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
+
+  .bar-track{ height:5px;background:var(--surface-2);border-radius:3px;overflow:hidden; }
+  .bar-fill{ height:100%;background:var(--signal);border-radius:3px;transition:width .3s; }
+  .bar-indet{ height:100%;width:35%;background:var(--render);border-radius:3px;animation:indet 1.1s ease-in-out infinite; }
+  @keyframes indet{ 0%{ margin-left:-35%; } 100%{ margin-left:100%; } }
+
+  /* toast */
+  .toast{ position:fixed;z-index:9999;left:50%;bottom:5.5rem;transform:translateX(-50%);
+          background:var(--surface-2);border:1px solid var(--line);border-radius:.7rem;
+          padding:.7rem 1rem;font-size:.85rem;max-width:340px;box-shadow:0 12px 40px #0008;
+          animation:rise .22s ease;display:flex;gap:.5rem;align-items:center; }
+  .toast.ok{ border-color:#1d4634; } .toast.err{ border-color:#4a2230; }
+  @keyframes rise{ from{ opacity:0;transform:translate(-50%,1rem); } }
+  @media(min-width:768px){ .toast{ left:auto;right:1.5rem;bottom:1.5rem;transform:none; }
+    @keyframes rise{ from{ opacity:0;transform:translateY(1rem); } } }
+
+  /* 9:16 viewfinder modal */
+  .vf-overlay{ position:fixed;inset:0;z-index:10000;background:#05080bdd;backdrop-filter:blur(6px);
+               display:flex;align-items:center;justify-content:center;padding:1.2rem;animation:fade .2s ease; }
+  @keyframes fade{ from{ opacity:0; } }
+  .vf-frame{ position:relative;background:#000;border:1px solid var(--line);border-radius:12px;
+             aspect-ratio:9/16;max-height:82vh;max-width:min(46vh,92vw);overflow:hidden; }
+  .vf-frame video,.vf-frame img{ width:100%;height:100%;object-fit:contain;background:#000;display:block; }
+  .vf-tick{ position:absolute;width:14px;height:14px;border-color:var(--signal);opacity:.85; }
+  .vf-tl{ top:8px;left:8px;border-top:2px solid;border-left:2px solid; }
+  .vf-tr{ top:8px;right:8px;border-top:2px solid;border-right:2px solid; }
+  .vf-bl{ bottom:8px;left:8px;border-bottom:2px solid;border-left:2px solid; }
+  .vf-br{ bottom:8px;right:8px;border-bottom:2px solid;border-right:2px solid; }
+  .vf-meta{ position:absolute;top:8px;left:50%;transform:translateX(-50%);font-family:var(--mono);
+            font-size:.6rem;letter-spacing:.1em;color:#cfd6de;background:#0009;padding:.15rem .5rem;
+            border-radius:.3rem;white-space:nowrap;max-width:80%;overflow:hidden;text-overflow:ellipsis; }
+  .vf-rec{ position:absolute;bottom:8px;left:50%;transform:translateX(-50%);font-family:var(--mono);
+           font-size:.6rem;color:var(--signal);display:flex;align-items:center;gap:.3rem; }
+  .vf-rec::before{ content:'';width:.4rem;height:.4rem;border-radius:50%;background:var(--signal);
+           animation:blink 1.2s steps(1) infinite; }
+  @keyframes blink{ 50%{ opacity:.25; } }
+
+  ::-webkit-scrollbar{ width:6px;height:6px; }
+  ::-webkit-scrollbar-thumb{ background:var(--line);border-radius:3px; }
+  ::-webkit-scrollbar-thumb:hover{ background:#3a4654; }
+
+  .clickable{ cursor:pointer; }
+  .clickable:hover .src-name{ color:var(--signal); }
+  .src-name{ transition:color .15s; }
+
+  @media(max-width:767px){
+    #sidebar{ display:none; } #bottom-nav{ display:flex; } #main{ padding-bottom:5rem; }
   }
+  @media(min-width:768px){ #sidebar{ display:flex; } #bottom-nav{ display:none; } }
 </style>
 </head>
 <body class="flex h-screen overflow-hidden">
 
-<!-- ── Sidebar (desktop) ── -->
-<nav id="sidebar" class="w-56 flex-shrink-0 flex-col border-r border-gray-800 p-4 gap-2 overflow-y-auto">
-  <div class="text-brand font-bold text-lg mb-4 px-2">🎬 Content Factory</div>
-  <button onclick="showPage('library')" class="nav-btn w-full text-left px-3 py-2 rounded-lg text-sm font-medium transition-colors" data-page="library">📚 Библиотека</button>
-  <button onclick="showPage('generate')" class="nav-btn w-full text-left px-3 py-2 rounded-lg text-sm font-medium transition-colors" data-page="generate">🚀 Создать</button>
-  <button onclick="showPage('jobs')" class="nav-btn w-full text-left px-3 py-2 rounded-lg text-sm font-medium transition-colors" data-page="jobs">⚙️ Задачи <span id="jobs-badge" class="ml-1 hidden text-xs bg-brand text-black rounded-full px-1.5 py-0.5"></span></button>
+<!-- ── Sidebar / pipeline rail (desktop) ── -->
+<nav id="sidebar" class="w-60 flex-shrink-0 flex-col border-r p-4 gap-1 overflow-y-auto" style="border-color:var(--line)">
+  <div class="px-1 mb-6">
+    <div class="disp text-lg font-extrabold leading-none">Content<span style="color:var(--signal)">.</span>Factory</div>
+    <div class="eyebrow mt-1.5">монтажный&nbsp;пульт</div>
+  </div>
+  <div class="eyebrow px-1 mb-2">конвейер</div>
+  <button onclick="showPage('library')"  class="nav-btn" data-page="library"><span class="nav-num">01</span><span>📚 Материалы</span></button>
+  <button onclick="showPage('generate')" class="nav-btn" data-page="generate"><span class="nav-num">02</span><span>🎬 Сборка</span></button>
+  <button onclick="showPage('jobs')"     class="nav-btn" data-page="jobs">
+    <span class="nav-num">03</span><span>⚡ Очередь</span>
+    <span id="jobs-badge" class="ml-auto mono hidden text-xs rounded-full px-1.5" style="background:var(--render);color:#08121c"></span>
+  </button>
+  <div class="mt-auto pt-4 eyebrow px-1" style="color:var(--faint)">9 : 16 · shorts / reels</div>
 </nav>
 
-<!-- ── Main content ── -->
-<div id="main-content" class="flex-1 overflow-y-auto">
+<!-- ── Main ── -->
+<div id="main" class="flex-1 overflow-y-auto">
 
-  <!-- Library page -->
-  <div id="page-library" class="page p-4 md:p-6 max-w-4xl mx-auto">
-    <h1 class="text-xl font-bold mb-4">📚 Библиотека</h1>
+  <!-- LIBRARY -->
+  <div id="page-library" class="page p-4 md:p-7 max-w-4xl mx-auto">
+    <div class="eyebrow">этап 01</div>
+    <h1 class="disp text-2xl font-bold mt-1 mb-5">Материалы</h1>
 
-    <!-- Category tabs -->
-    <div class="flex gap-1 border-b border-gray-800 mb-5 overflow-x-auto">
-      <button onclick="switchCat('top_video')" class="cat-tab tab-inactive border-b-2 px-4 py-2 text-sm font-medium whitespace-nowrap" data-cat="top_video">🎤 Верхние</button>
-      <button onclick="switchCat('bottom_video')" class="cat-tab tab-inactive border-b-2 px-4 py-2 text-sm font-medium whitespace-nowrap" data-cat="bottom_video">🎮 Нижние</button>
-      <button onclick="switchCat('banner_image')" class="cat-tab tab-inactive border-b-2 px-4 py-2 text-sm font-medium whitespace-nowrap" data-cat="banner_image">🖼️ Баннеры (фото)</button>
-      <button onclick="switchCat('banner_video')" class="cat-tab tab-inactive border-b-2 px-4 py-2 text-sm font-medium whitespace-nowrap" data-cat="banner_video">📹 Баннеры (видео)</button>
+    <div class="overflow-x-auto -mx-1 px-1 mb-5">
+      <div class="seg" id="cat-seg">
+        <button onclick="switchCat('top_video')"     class="seg-btn" data-cat="top_video"><span class="dot"></span>Верхние</button>
+        <button onclick="switchCat('bottom_video')"  class="seg-btn" data-cat="bottom_video"><span class="dot"></span>Нижние</button>
+        <button onclick="switchCat('blog_video')"     class="seg-btn" data-cat="blog_video"><span class="dot"></span>Блог</button>
+        <button onclick="switchCat('banner_image')"  class="seg-btn" data-cat="banner_image"><span class="dot"></span>Баннер&nbsp;фото</button>
+        <button onclick="switchCat('banner_video')"  class="seg-btn" data-cat="banner_video"><span class="dot"></span>Баннер&nbsp;видео</button>
+      </div>
     </div>
 
     <!-- Upload -->
-    <div class="mb-5">
-      <label id="drop-label" class="drop-zone" for="file-input">
+    <div class="mb-6">
+      <label id="drop" class="drop block" for="file-input">
         <input type="file" id="file-input" class="hidden" accept="video/*,image/*" onchange="handleFileSelect(this)"/>
-        <div class="text-3xl mb-2">☁️</div>
-        <div class="text-gray-400 text-sm">Перетащите файл или <span class="text-brand underline">выберите</span></div>
+        <div class="text-2xl mb-1">⤓</div>
+        <div class="text-sm" style="color:var(--muted)">Перетащите файл сюда или <span style="color:var(--signal)" class="underline">выберите</span></div>
+        <div class="eyebrow mt-1">mp4 · mov · jpg · png</div>
       </label>
-      <div id="upload-name-row" class="hidden mt-3 flex gap-2">
-        <input type="text" id="upload-name" placeholder="Название файла" class="input flex-1"/>
+      <div id="upload-name-row" class="hidden mt-3 flex gap-2 flex-wrap">
+        <div class="flex-1 min-w-[180px]">
+          <input type="text" id="upload-name" placeholder="Название материала" class="input"/>
+          <div id="upload-filemeta" class="eyebrow mt-1.5"></div>
+        </div>
         <button onclick="doUpload()" class="btn btn-primary">Загрузить</button>
-        <button onclick="cancelUpload()" class="btn btn-secondary">✕</button>
+        <button onclick="cancelUpload()" class="btn btn-ghost">Отмена</button>
       </div>
-      <div id="upload-progress-wrap" class="hidden mt-2">
-        <div class="flex justify-between text-xs text-gray-400 mb-1">
-          <span id="upload-progress-label">Загрузка…</span>
-          <span id="upload-progress-pct">0%</span>
+      <div id="upload-progress-wrap" class="hidden mt-3">
+        <div class="flex justify-between mono text-xs mb-1" style="color:var(--muted)">
+          <span>Загрузка…</span><span id="upload-progress-pct">0%</span>
         </div>
-        <div class="h-1 bg-gray-800 rounded">
-          <div id="upload-progress-bar" class="progress-bar" style="width:0%"></div>
-        </div>
+        <div class="bar-track"><div id="upload-progress-bar" class="bar-fill" style="width:0%"></div></div>
       </div>
     </div>
 
-    <!-- Sources list -->
     <div id="sources-list" class="space-y-3"></div>
   </div>
 
-  <!-- Generate page -->
-  <div id="page-generate" class="page hidden p-4 md:p-6 max-w-2xl mx-auto">
-    <h1 class="text-xl font-bold mb-5">🚀 Создать шортс</h1>
+  <!-- GENERATE -->
+  <div id="page-generate" class="page hidden p-4 md:p-7 max-w-2xl mx-auto">
+    <div class="eyebrow">этап 02</div>
+    <h1 class="disp text-2xl font-bold mt-1 mb-4">Сборка</h1>
 
-    <!-- Step indicator -->
-    <div class="flex items-center gap-2 mb-7">
-      <div class="step-dot" id="sdot-0">1</div><div class="h-px flex-1 bg-gray-700"></div>
-      <div class="step-dot" id="sdot-1">2</div><div class="h-px flex-1 bg-gray-700"></div>
-      <div class="step-dot" id="sdot-2">3</div><div class="h-px flex-1 bg-gray-700"></div>
-      <div class="step-dot" id="sdot-3">4</div>
+    <!-- mode switch -->
+    <div class="seg mb-6" id="gen-mode-seg">
+      <button onclick="setGenMode('split')" class="seg-btn" data-mode="split"><span class="dot"></span>Сплит-экран</button>
+      <button onclick="setGenMode('blog')"  class="seg-btn" data-mode="blog"><span class="dot"></span>Блог · один клип</button>
     </div>
 
-    <div id="gen-step-0">
-      <p class="text-gray-400 text-sm mb-3">Шаг 1 — Выберите источник <strong>верхнего</strong> видео (с речью)</p>
-      <div id="gen-top-list" class="space-y-2"></div>
-    </div>
+    <!-- step rail -->
+    <div class="srail mb-7" id="step-rail"></div>
 
-    <div id="gen-step-1" class="hidden">
-      <p class="text-gray-400 text-sm mb-3">Шаг 2 — Выберите источник <strong>нижнего</strong> видео (фон/геймплей)</p>
-      <div id="gen-bot-list" class="space-y-2"></div>
-      <button onclick="genBack(0)" class="btn btn-secondary mt-4">← Назад</button>
-    </div>
-
-    <div id="gen-step-2" class="hidden">
-      <p class="text-gray-400 text-sm mb-3">Шаг 3 — Выберите баннер</p>
-      <div id="gen-ban-list" class="space-y-2"></div>
-      <button onclick="genBack(1)" class="btn btn-secondary mt-4">← Назад</button>
-    </div>
-
-    <div id="gen-step-3" class="hidden">
-      <p class="text-gray-400 text-sm mb-3">Шаг 4 — Выберите анимацию баннера и запустите</p>
-      <div class="card p-4 mb-4 space-y-3 text-sm text-gray-300">
-        <div><span class="text-gray-500">Верхнее:</span> <span id="confirm-top" class="text-white"></span></div>
-        <div><span class="text-gray-500">Нижнее:</span> <span id="confirm-bot" class="text-white"></span></div>
-        <div><span class="text-gray-500">Баннер:</span> <span id="confirm-ban" class="text-white"></span></div>
+    <!-- SPLIT steps -->
+    <div id="genwrap-split">
+      <div id="gen-step-0" class="genstep">
+        <p class="text-sm mb-3" style="color:var(--muted)">Источник <b style="color:var(--ink)">верхнего</b> видео — речь / лицо</p>
+        <div id="gen-top-list" class="space-y-2"></div>
       </div>
-      <div class="mb-4">
-        <p class="text-xs text-gray-500 mb-2">Анимация баннера:</p>
-        <div class="flex gap-2 flex-wrap">
-          <button onclick="setAnim('slide_left')" class="anim-btn btn btn-secondary" data-anim="slide_left">◀️ Слева</button>
-          <button onclick="setAnim('slide_right')" class="anim-btn btn btn-secondary" data-anim="slide_right">▶️ Справа</button>
-          <button onclick="setAnim('fade')" class="anim-btn btn btn-secondary" data-anim="fade">✨ Фейд</button>
+      <div id="gen-step-1" class="genstep hidden">
+        <p class="text-sm mb-3" style="color:var(--muted)">Источник <b style="color:var(--ink)">нижнего</b> видео — фон / геймплей</p>
+        <div id="gen-bot-list" class="space-y-2"></div>
+        <button onclick="genBack(0)" class="btn btn-ghost btn-sm mt-4">← Назад</button>
+      </div>
+      <div id="gen-step-2" class="genstep hidden">
+        <p class="text-sm mb-3" style="color:var(--muted)">Баннер</p>
+        <div id="gen-ban-list" class="space-y-2"></div>
+        <button onclick="genBack(1)" class="btn btn-ghost btn-sm mt-4">← Назад</button>
+      </div>
+      <div id="gen-step-3" class="genstep hidden">
+        <p class="text-sm mb-3" style="color:var(--muted)">Проверьте и запустите</p>
+        <div class="surface p-4 mb-4 space-y-2 text-sm">
+          <div class="flex justify-between"><span style="color:var(--faint)">Верхнее</span><span id="confirm-top" class="font-semibold"></span></div>
+          <div class="flex justify-between"><span style="color:var(--faint)">Нижнее</span><span id="confirm-bot" class="font-semibold"></span></div>
+          <div class="flex justify-between"><span style="color:var(--faint)">Баннер</span><span id="confirm-ban" class="font-semibold"></span></div>
+        </div>
+        <div class="mb-5">
+          <div class="eyebrow mb-2">анимация баннера</div>
+          <div class="flex gap-2 flex-wrap" id="anim-row-split">
+            <button onclick="setAnim('slide_left',this)"  class="anim-btn btn btn-secondary btn-sm" data-anim="slide_left">◀ Слева</button>
+            <button onclick="setAnim('slide_right',this)" class="anim-btn btn btn-secondary btn-sm" data-anim="slide_right">Справа ▶</button>
+            <button onclick="setAnim('fade',this)"        class="anim-btn btn btn-secondary btn-sm" data-anim="fade">✦ Фейд</button>
+          </div>
+        </div>
+        <div class="flex gap-3">
+          <button onclick="genBack(2)" class="btn btn-ghost">← Назад</button>
+          <button onclick="doGenerate()" class="btn btn-primary flex-1">● Собрать шортс</button>
         </div>
       </div>
-      <div class="flex gap-3">
-        <button onclick="genBack(2)" class="btn btn-secondary">← Назад</button>
-        <button onclick="doGenerate()" class="btn btn-primary flex-1">🚀 Сгенерировать</button>
+    </div>
+
+    <!-- BLOG steps -->
+    <div id="genwrap-blog" class="hidden">
+      <div id="blog-step-0" class="genstep">
+        <p class="text-sm mb-3" style="color:var(--muted)">Источник <b style="color:var(--ink)">блог</b>-видео (один клип на весь экран)</p>
+        <div id="gen-blog-list" class="space-y-2"></div>
+      </div>
+      <div id="blog-step-1" class="genstep hidden">
+        <p class="text-sm mb-3" style="color:var(--muted)">Баннер <span style="color:var(--faint)">(необязательно)</span></p>
+        <button onclick="pickBlogBanner(null,'без баннера')" class="surface hover-line w-full p-3 text-left text-sm mb-2">— Без баннера —</button>
+        <div id="gen-blogban-list" class="space-y-2"></div>
+        <button onclick="blogBack(0)" class="btn btn-ghost btn-sm mt-4">← Назад</button>
+      </div>
+      <div id="blog-step-2" class="genstep hidden">
+        <p class="text-sm mb-3" style="color:var(--muted)">Проверьте и запустите</p>
+        <div class="surface p-4 mb-4 space-y-2 text-sm">
+          <div class="flex justify-between"><span style="color:var(--faint)">Блог-видео</span><span id="confirm-blog" class="font-semibold"></span></div>
+          <div class="flex justify-between"><span style="color:var(--faint)">Баннер</span><span id="confirm-blogban" class="font-semibold"></span></div>
+        </div>
+        <div id="blog-anim-block" class="mb-5">
+          <div class="eyebrow mb-2">анимация баннера</div>
+          <div class="flex gap-2 flex-wrap" id="anim-row-blog">
+            <button onclick="setBlogAnim('slide_left',this)"  class="btn btn-secondary btn-sm" data-anim="slide_left">◀ Слева</button>
+            <button onclick="setBlogAnim('slide_right',this)" class="btn btn-secondary btn-sm" data-anim="slide_right">Справа ▶</button>
+            <button onclick="setBlogAnim('fade',this)"        class="btn btn-secondary btn-sm" data-anim="fade">✦ Фейд</button>
+          </div>
+        </div>
+        <div class="flex gap-3">
+          <button onclick="blogBack(1)" class="btn btn-ghost">← Назад</button>
+          <button onclick="doGenerateBlog()" class="btn btn-primary flex-1">● Собрать клип</button>
+        </div>
       </div>
     </div>
   </div>
 
-  <!-- Jobs page -->
-  <div id="page-jobs" class="page hidden p-4 md:p-6 max-w-3xl mx-auto">
-    <div class="flex items-center justify-between mb-4">
-      <h1 class="text-xl font-bold">⚙️ Задачи</h1>
-      <button onclick="loadJobs()" class="btn btn-secondary btn-sm">↻ Обновить</button>
+  <!-- JOBS -->
+  <div id="page-jobs" class="page hidden p-4 md:p-7 max-w-3xl mx-auto">
+    <div class="flex items-end justify-between mb-5">
+      <div>
+        <div class="eyebrow">этап 03</div>
+        <h1 class="disp text-2xl font-bold mt-1">Очередь рендера</h1>
+      </div>
+      <button onclick="loadJobs()" class="btn btn-ghost btn-sm">↻ Обновить</button>
     </div>
     <div id="jobs-list" class="space-y-3"></div>
   </div>
@@ -180,429 +331,361 @@ tailwind.config = {
 </div>
 
 <!-- ── Bottom nav (mobile) ── -->
-<nav id="bottom-nav" class="fixed bottom-0 left-0 right-0 border-t border-gray-800 bg-gray-950 flex justify-around py-2 z-50">
-  <button onclick="showPage('library')" class="mob-nav flex flex-col items-center gap-0.5 text-xs px-4 py-1" data-page="library">
-    <span class="text-xl">📚</span><span>Библиотека</span>
-  </button>
-  <button onclick="showPage('generate')" class="mob-nav flex flex-col items-center gap-0.5 text-xs px-4 py-1" data-page="generate">
-    <span class="text-xl">🚀</span><span>Создать</span>
-  </button>
-  <button onclick="showPage('jobs')" class="mob-nav flex flex-col items-center gap-0.5 text-xs px-4 py-1" data-page="jobs">
-    <span class="text-xl">⚙️</span><span>Задачи</span>
-  </button>
+<nav id="bottom-nav" class="fixed bottom-0 left-0 right-0 border-t flex justify-around py-2 z-50"
+     style="border-color:var(--line);background:#0c1014ee;backdrop-filter:blur(10px);padding-bottom:max(.5rem,env(safe-area-inset-bottom))">
+  <button onclick="showPage('library')"  class="mob-nav flex flex-col items-center gap-0.5 text-[.66rem] font-semibold px-5 py-1" data-page="library"><span class="text-lg">📚</span>Материалы</button>
+  <button onclick="showPage('generate')" class="mob-nav flex flex-col items-center gap-0.5 text-[.66rem] font-semibold px-5 py-1" data-page="generate"><span class="text-lg">🎬</span>Сборка</button>
+  <button onclick="showPage('jobs')"     class="mob-nav flex flex-col items-center gap-0.5 text-[.66rem] font-semibold px-5 py-1" data-page="jobs"><span class="text-lg">⚡</span>Очередь</button>
 </nav>
 
-<!-- Toast -->
+<!-- viewfinder modal -->
+<div id="viewfinder" class="vf-overlay hidden" onclick="if(event.target===this)closePreview()">
+  <div>
+    <div class="vf-frame" id="vf-frame"></div>
+    <div class="flex justify-center mt-3">
+      <button onclick="closePreview()" class="btn btn-secondary btn-sm">✕ Закрыть</button>
+    </div>
+  </div>
+</div>
+
+<!-- toast -->
 <div id="toast" class="toast hidden"></div>
 
 <script>
-// ─── State ────────────────────────────────────────────────────────────────────
+// ─── State ──────────────────────────────────────────────────────────────────
 const state = {
   cat: 'top_video',
   pendingFile: null,
-  gen: { step: 0, topId: null, topName: '', botId: null, botName: '', banId: null, banName: '', anim: 'slide_left' },
+  genMode: 'split',
+  gen: { step:0, topId:null, topName:'', botId:null, botName:'', banId:null, banName:'', anim:'slide_left' },
+  blog:{ step:0, srcId:null, srcName:'', banId:null, banName:'без баннера', anim:'slide_left' },
 };
-
 let jobPollTimer = null;
 
-// ─── Navigation ──────────────────────────────────────────────────────────────
-function showPage(name) {
-  document.querySelectorAll('.page').forEach(p => p.classList.add('hidden'));
-  document.getElementById('page-' + name).classList.remove('hidden');
+const $ = id => document.getElementById(id);
+function fmtSize(b){ if(b<1024)return b+' B'; if(b<1048576)return (b/1024).toFixed(0)+' KB';
+  if(b<1073741824)return (b/1048576).toFixed(1)+' MB'; return (b/1073741824).toFixed(2)+' GB'; }
 
-  document.querySelectorAll('.nav-btn').forEach(b => {
-    b.classList.toggle('bg-gray-800', b.dataset.page === name);
-    b.classList.toggle('text-brand', b.dataset.page === name);
-    b.classList.toggle('text-gray-400', b.dataset.page !== name);
+// ─── Navigation ───────────────────────────────────────────────────────────────
+function showPage(name){
+  document.querySelectorAll('.page').forEach(p=>p.classList.add('hidden'));
+  $('page-'+name).classList.remove('hidden');
+  document.querySelectorAll('.nav-btn').forEach(b=>b.classList.toggle('on', b.dataset.page===name));
+  document.querySelectorAll('.mob-nav').forEach(b=>{
+    const on=b.dataset.page===name;
+    b.style.color = on ? 'var(--signal)' : 'var(--faint)';
   });
-  document.querySelectorAll('.mob-nav').forEach(b => {
-    b.classList.toggle('text-brand', b.dataset.page === name);
-    b.classList.toggle('text-gray-500', b.dataset.page !== name);
-  });
-
-  if (name === 'library') loadSources();
-  if (name === 'generate') initGenerate();
-  if (name === 'jobs') { loadJobs(); startJobPoll(); }
-  else stopJobPoll();
+  if(name==='library') loadSources();
+  if(name==='generate') initGenerate();
+  if(name==='jobs'){ loadJobs(); startJobPoll(); } else stopJobPoll();
 }
 
-// ─── Toast ────────────────────────────────────────────────────────────────────
-function toast(msg, ok = true) {
-  const el = document.getElementById('toast');
-  el.textContent = (ok ? '✅ ' : '❌ ') + msg;
+// ─── Toast ──────────────────────────────────────────────────────────────────
+function toast(msg, ok=true){
+  const el=$('toast');
+  el.className='toast '+(ok?'ok':'err');
+  el.innerHTML = `<span>${ok?'✓':'⚠'}</span><span>${esc(msg)}</span>`;
   el.classList.remove('hidden');
-  clearTimeout(el._t);
-  el._t = setTimeout(() => el.classList.add('hidden'), 3500);
+  clearTimeout(el._t); el._t=setTimeout(()=>el.classList.add('hidden'), 4000);
 }
 
 // ─── Library ──────────────────────────────────────────────────────────────────
-function switchCat(cat) {
-  state.cat = cat;
-  document.querySelectorAll('.cat-tab').forEach(t => {
-    const active = t.dataset.cat === cat;
-    t.classList.toggle('tab-active', active);
-    t.classList.toggle('tab-inactive', !active);
-  });
-  // reset upload
+function switchCat(cat){
+  state.cat=cat;
+  document.querySelectorAll('.cat-tab,[data-cat]').forEach(t=>{ if(t.dataset.cat!==undefined) t.classList.toggle('on', t.dataset.cat===cat); });
   cancelUpload();
-  // update file input accept
-  const isImg = cat === 'banner_image';
-  document.getElementById('file-input').accept = isImg ? 'image/*' : 'video/*,image/*';
+  $('file-input').accept = (cat==='banner_image') ? 'image/*' : 'video/*,image/*';
   loadSources();
 }
 
-async function loadSources() {
-  const cat = state.cat;
-  const isBanner = cat.startsWith('banner');
+async function loadSources(){
+  const cat=state.cat, isBanner=cat.startsWith('banner');
   let rows;
-  if (isBanner) {
-    rows = await api('/ui/api/banners');
-    rows = rows.filter(r => r.category === cat);
-  } else {
-    rows = await api(`/ui/api/sources/${cat}`);
-  }
-  const el = document.getElementById('sources-list');
-  el.innerHTML = '';
-  if (!rows || rows.length === 0) {
-    el.innerHTML = '<p class="text-gray-500 text-sm text-center py-8">Нет файлов. Загрузите первый.</p>';
+  if(isBanner){ rows=await api('/ui/api/banners'); rows=(rows||[]).filter(r=>r.category===cat); }
+  else { rows=await api(`/ui/api/sources/${cat}`); }
+  const el=$('sources-list'); el.innerHTML='';
+  if(!rows||rows.length===0){
+    el.innerHTML=`<div class="surface p-8 text-center"><div class="text-2xl mb-2">∅</div>
+      <p class="text-sm" style="color:var(--muted)">Здесь пока пусто. Загрузите первый материал выше.</p></div>`;
     return;
   }
-  rows.forEach(r => el.appendChild(isBanner ? renderBanner(r) : renderSource(r)));
+  rows.forEach(r=> el.appendChild(isBanner ? renderBanner(r) : renderSource(r)));
 }
 
-function renderSource(r) {
-  const div = document.createElement('div');
-  div.className = 'card p-3';
+function renderSource(r){
+  const div=document.createElement('div');
+  div.className='surface hover-line p-3';
+  const cuts = r.clip_count>0;
+  const cutLabel = cuts ? '✂ Перенарезать' : '✂ Нарезать';
+  const cutClass = cuts ? 'btn-secondary' : 'btn-primary';
   div.innerHTML = `
     <div class="flex items-center justify-between gap-2 flex-wrap">
-      <div class="flex items-center gap-2 min-w-0">
-        <span class="tag-source">источник</span>
-        <span class="font-medium text-sm truncate">${esc(r.name)}</span>
-        ${r.clip_count > 0 ? `<span class="tag-clip">${r.clip_count} клипов</span>` : ''}
-        ${'unused_count' in r && r.clip_count > 0 ? `<span class="badge-unused">${r.unused_count} новых</span>` : ''}
+      <div class="flex items-center gap-2 min-w-0 clickable" onclick="openPreview(${r.id},${jstr(r.name)},false)">
+        <span class="chip chip-src">SRC</span>
+        <span class="font-semibold text-sm truncate src-name">${esc(r.name)}</span>
+        ${cuts?`<span class="chip chip-clip">${r.clip_count} клип.</span>`:''}
+        ${('unused_count' in r && cuts)?`<span class="chip chip-new">${r.unused_count} нов.</span>`:''}
       </div>
-      <div class="flex gap-2 flex-shrink-0">
-        ${r.clip_count === 0 ? `<button onclick="doCut(${r.id},'${state.cat}',this)" class="btn btn-primary btn-sm">✂️ Нарезать</button>` : ''}
-        <button onclick="toggleClips(${r.id})" class="btn btn-secondary btn-sm" id="clips-toggle-${r.id}">📋 Клипы</button>
-        <button onclick="doDeleteSource(${r.id})" class="btn btn-danger btn-sm">🗑</button>
+      <div class="flex gap-1.5 flex-shrink-0">
+        <button onclick="doCut(${r.id},'${state.cat}',this,${cuts})" class="btn ${cutClass} btn-sm">${cutLabel}</button>
+        <button onclick="toggleClips(${r.id})" class="btn btn-ghost btn-sm">Клипы</button>
+        <button onclick="doDeleteSource(${r.id})" class="btn btn-danger btn-icon" title="Удалить">🗑</button>
       </div>
     </div>
-    <div id="clips-${r.id}" class="hidden mt-3 space-y-1 pl-2 border-l border-gray-700"></div>
-  `;
+    <div id="clips-${r.id}" class="hidden mt-3 space-y-1 pl-3 border-l" style="border-color:var(--line)"></div>`;
   return div;
 }
 
-function renderBanner(r) {
-  const div = document.createElement('div');
-  div.className = 'card p-3 flex items-center justify-between gap-2';
-  const type = r.category === 'banner_video' ? '📹' : '🖼️';
-  div.innerHTML = `
-    <span class="font-medium text-sm truncate">${type} ${esc(r.name)}</span>
-    <button onclick="doDeleteBanner(${r.id})" class="btn btn-danger btn-sm">🗑</button>
-  `;
+function renderBanner(r){
+  const div=document.createElement('div');
+  div.className='surface hover-line p-3 flex items-center justify-between gap-2';
+  const isVid=r.category==='banner_video';
+  div.innerHTML=`
+    <div class="flex items-center gap-2 min-w-0 clickable" onclick="openPreview(${r.id},${jstr(r.name)},${!isVid})">
+      <span class="chip ${isVid?'chip-clip':'chip-src'}">${isVid?'VID':'IMG'}</span>
+      <span class="font-semibold text-sm truncate src-name">${esc(r.name)}</span>
+    </div>
+    <button onclick="doDeleteBanner(${r.id})" class="btn btn-danger btn-icon" title="Удалить">🗑</button>`;
   return div;
 }
 
-async function toggleClips(sourceId) {
-  const el = document.getElementById(`clips-${sourceId}`);
-  if (!el.classList.contains('hidden')) { el.classList.add('hidden'); return; }
+async function toggleClips(id){
+  const el=$('clips-'+id);
+  if(!el.classList.contains('hidden')){ el.classList.add('hidden'); return; }
   el.classList.remove('hidden');
-  el.innerHTML = '<div class="spinner"></div>';
-  const clips = await api(`/ui/api/sources/${sourceId}/clips`);
-  if (!clips || clips.length === 0) {
-    el.innerHTML = '<p class="text-gray-500 text-xs">Клипов ещё нет</p>';
-    return;
-  }
-  el.innerHTML = clips.map(c => `
+  el.innerHTML='<div class="spinner"></div>';
+  const clips=await api(`/ui/api/sources/${id}/clips`);
+  if(!clips||clips.length===0){ el.innerHTML='<p class="text-xs" style="color:var(--faint)">Клипов ещё нет — нажмите «Нарезать»</p>'; return; }
+  el.innerHTML = clips.map(c=>`
     <div class="flex items-center justify-between gap-2 py-1">
-      <span class="text-xs text-gray-300 truncate">${c.used ? '✅' : '⬜'} ${esc(c.name)}</span>
-      <button onclick="doDeleteClip(${c.id},${sourceId})" class="btn btn-danger btn-sm" style="padding:.2rem .5rem">🗑</button>
-    </div>
-  `).join('');
+      <span class="text-xs truncate clickable src-name" style="color:var(--muted)" onclick="openPreview(${c.id},${jstr(c.name)},false)">
+        <span class="chip ${c.used?'chip-used':'chip-new'}">${c.used?'USED':'NEW'}</span> ${esc(c.name)}</span>
+      <button onclick="doDeleteClip(${c.id},${id})" class="btn btn-danger btn-icon" style="width:1.7rem;height:1.7rem;padding:.2rem">🗑</button>
+    </div>`).join('');
 }
 
 // ─── Upload ───────────────────────────────────────────────────────────────────
-const dropLabel = document.getElementById('drop-label');
-dropLabel.addEventListener('dragover', e => { e.preventDefault(); dropLabel.classList.add('over'); });
-dropLabel.addEventListener('dragleave', () => dropLabel.classList.remove('over'));
-dropLabel.addEventListener('drop', e => {
-  e.preventDefault();
-  dropLabel.classList.remove('over');
-  const f = e.dataTransfer.files[0];
-  if (f) prepareUpload(f);
-});
-
-function handleFileSelect(input) {
-  if (input.files[0]) prepareUpload(input.files[0]);
+const drop=$('drop');
+drop.addEventListener('dragover', e=>{ e.preventDefault(); drop.classList.add('over'); });
+drop.addEventListener('dragleave', ()=>drop.classList.remove('over'));
+drop.addEventListener('drop', e=>{ e.preventDefault(); drop.classList.remove('over');
+  const f=e.dataTransfer.files[0]; if(f) prepareUpload(f); });
+function handleFileSelect(input){ if(input.files[0]) prepareUpload(input.files[0]); }
+function prepareUpload(file){
+  state.pendingFile=file;
+  $('upload-name').value=file.name.replace(/\.[^.]+$/,'');
+  $('upload-filemeta').textContent = `${file.name} · ${fmtSize(file.size)}`;
+  $('upload-name-row').classList.remove('hidden');
 }
-
-function prepareUpload(file) {
-  state.pendingFile = file;
-  const nameEl = document.getElementById('upload-name');
-  nameEl.value = file.name.replace(/\.[^.]+$/, '');
-  document.getElementById('upload-name-row').classList.remove('hidden');
+function cancelUpload(){
+  state.pendingFile=null;
+  $('upload-name-row').classList.add('hidden');
+  $('upload-progress-wrap').classList.add('hidden');
+  $('file-input').value='';
 }
-
-function cancelUpload() {
-  state.pendingFile = null;
-  document.getElementById('upload-name-row').classList.add('hidden');
-  document.getElementById('upload-progress-wrap').classList.add('hidden');
-  document.getElementById('file-input').value = '';
-}
-
-async function doUpload() {
-  if (!state.pendingFile) return;
-  const name = document.getElementById('upload-name').value.trim() || state.pendingFile.name;
-  const form = new FormData();
-  form.append('name', name);
-  form.append('file', state.pendingFile);
-
-  document.getElementById('upload-progress-wrap').classList.remove('hidden');
-  document.getElementById('upload-name-row').classList.add('hidden');
-
-  try {
-    await new Promise((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      xhr.open('POST', `/ui/api/upload/${state.cat}`);
-      xhr.upload.onprogress = e => {
-        if (e.lengthComputable) {
-          const pct = Math.round(e.loaded / e.total * 100);
-          document.getElementById('upload-progress-bar').style.width = pct + '%';
-          document.getElementById('upload-progress-pct').textContent = pct + '%';
-        }
-      };
-      xhr.onload = () => xhr.status < 300 ? resolve(JSON.parse(xhr.responseText)) : reject(new Error(xhr.responseText));
-      xhr.onerror = () => reject(new Error('Network error'));
+async function doUpload(){
+  if(!state.pendingFile) return;
+  const name=$('upload-name').value.trim() || state.pendingFile.name;
+  const form=new FormData(); form.append('name',name); form.append('file',state.pendingFile);
+  $('upload-progress-wrap').classList.remove('hidden');
+  $('upload-name-row').classList.add('hidden');
+  try{
+    await new Promise((resolve,reject)=>{
+      const xhr=new XMLHttpRequest();
+      xhr.open('POST',`/ui/api/upload/${state.cat}`);
+      xhr.upload.onprogress=e=>{ if(e.lengthComputable){ const p=Math.round(e.loaded/e.total*100);
+        $('upload-progress-bar').style.width=p+'%'; $('upload-progress-pct').textContent=p+'%'; } };
+      xhr.onload=()=> xhr.status<300 ? resolve() : reject(new Error(xhr.responseText));
+      xhr.onerror=()=>reject(new Error('Сеть недоступна'));
       xhr.send(form);
     });
-    toast('Файл загружен');
-    cancelUpload();
-    loadSources();
-  } catch (e) {
-    toast('Ошибка загрузки: ' + e.message, false);
-    document.getElementById('upload-progress-wrap').classList.add('hidden');
-  }
+    toast('Материал загружен'); cancelUpload(); loadSources();
+  }catch(e){ toast('Не удалось загрузить: '+e.message,false); $('upload-progress-wrap').classList.add('hidden'); }
 }
 
 // ─── Delete ───────────────────────────────────────────────────────────────────
-async function doDeleteSource(id) {
-  if (!confirm('Удалить источник и все его клипы?')) return;
-  await api(`/ui/api/sources/${id}`, { method: 'DELETE' });
-  toast('Удалено');
-  loadSources();
-}
+async function doDeleteSource(id){ if(!confirm('Удалить источник и все его клипы?'))return;
+  await api(`/ui/api/sources/${id}`,{method:'DELETE'}); toast('Источник удалён'); loadSources(); }
+async function doDeleteClip(id,src){ if(!confirm('Удалить клип?'))return;
+  await api(`/ui/api/clips/${id}`,{method:'DELETE'}); toast('Клип удалён');
+  const el=$('clips-'+src); el.classList.add('hidden'); toggleClips(src); }
+async function doDeleteBanner(id){ if(!confirm('Удалить баннер?'))return;
+  await api(`/ui/api/banners/${id}`,{method:'DELETE'}); toast('Баннер удалён'); loadSources(); }
 
-async function doDeleteClip(id, sourceId) {
-  if (!confirm('Удалить клип?')) return;
-  await api(`/ui/api/clips/${id}`, { method: 'DELETE' });
-  toast('Клип удалён');
-  toggleClips(sourceId); // close
-  setTimeout(() => toggleClips(sourceId), 100); // reopen refreshed
-}
-
-async function doDeleteBanner(id) {
-  if (!confirm('Удалить баннер?')) return;
-  await api(`/ui/api/banners/${id}`, { method: 'DELETE' });
-  toast('Баннер удалён');
-  loadSources();
-}
-
-// ─── Cut ─────────────────────────────────────────────────────────────────────
-async function doCut(sourceId, category, btnEl) {
-  if (btnEl) { btnEl.disabled = true; btnEl.textContent = '⏳ Запуск…'; }
-  try {
-    await api('/ui/api/jobs/cut', {
-      method: 'POST',
-      json: { source_id: sourceId, category },
-    });
-    toast('Нарезка запущена — смотрите раздел Задачи');
-    startJobPoll();
+// ─── Cut ───────────────────────────────────────────────────────────────────────
+async function doCut(id,category,btn,recut){
+  if(recut && !confirm('Нарезать заново? Новые клипы добавятся к существующим.')) return;
+  if(btn){ btn.disabled=true; btn.textContent='⏳ Запуск…'; }
+  try{
+    await api('/ui/api/jobs/cut',{ method:'POST', json:{ source_id:id, category } });
+    toast('Нарезка запущена — следите в «Очереди»');
     showPage('jobs');
-  } catch (e) {
-    toast('Ошибка: ' + e.message, false);
-    if (btnEl) { btnEl.disabled = false; btnEl.textContent = '✂️ Нарезать'; }
+  }catch(e){ toast('Ошибка: '+e.message,false); if(btn){ btn.disabled=false; btn.textContent='✂ Нарезать'; } }
+}
+
+// ─── Generate: mode + step rail ─────────────────────────────────────────────────
+function setGenMode(m){
+  state.genMode=m;
+  document.querySelectorAll('#gen-mode-seg [data-mode]').forEach(b=>b.classList.toggle('on', b.dataset.mode===m));
+  $('genwrap-split').classList.toggle('hidden', m!=='split');
+  $('genwrap-blog').classList.toggle('hidden', m!=='blog');
+  if(m==='split'){ goGenStep(0); loadGenTop(); } else { goBlogStep(0); loadGenBlog(); }
+}
+function renderRail(n,total){
+  const rail=$('step-rail'); rail.innerHTML='';
+  for(let i=0;i<total;i++){
+    const d=document.createElement('div');
+    d.className='sdot '+(i<n?'done':i===n?'active':'idle');
+    d.textContent=i+1; rail.appendChild(d);
+    if(i<total-1){ const l=document.createElement('div'); l.className='sline'; rail.appendChild(l); }
   }
 }
-
-// ─── Generate wizard ──────────────────────────────────────────────────────────
-async function initGenerate() {
-  state.gen = { step: 0, topId: null, topName: '', botId: null, botName: '', banId: null, banName: '', anim: 'slide_left' };
-  setAnim('slide_left');
-  goGenStep(0);
-  await loadGenTop();
+function initGenerate(){
+  setGenMode(state.genMode || 'split');
 }
 
-async function loadGenTop() {
-  const rows = await api('/ui/api/sources/top_video');
-  const el = document.getElementById('gen-top-list');
-  el.innerHTML = '';
-  if (!rows || rows.length === 0) {
-    el.innerHTML = '<p class="text-gray-500 text-sm">Нет источников верхних видео. Сначала загрузите и нарежьте их.</p>';
-    return;
-  }
-  rows.forEach(r => {
-    if (!r.clip_count) return;
-    const btn = document.createElement('button');
-    btn.className = 'card w-full p-3 flex items-center justify-between hover:border-brand transition-colors text-left';
-    btn.innerHTML = `
-      <span class="font-medium text-sm">${esc(r.name)}</span>
-      <span class="badge-unused text-xs">${r.unused_count || 0} новых</span>
-    `;
-    btn.onclick = () => { state.gen.topId = r.id; state.gen.topName = r.name; goGenStep(1); loadGenBot(); };
-    el.appendChild(btn);
-  });
-  if (!el.children.length) el.innerHTML = '<p class="text-gray-500 text-sm">Нет нарезанных источников. Нарежьте видео в разделе Библиотека.</p>';
+// ── Split wizard ──
+async function loadGenTop(){
+  const rows=await api('/ui/api/sources/top_video'); const el=$('gen-top-list'); el.innerHTML='';
+  const ok=(rows||[]).filter(r=>r.clip_count);
+  if(!ok.length){ el.innerHTML=emptyGen('верхних'); return; }
+  ok.forEach(r=> el.appendChild(genCard(r.name, `${r.unused_count||0} нов.`, ()=>{ state.gen.topId=r.id; state.gen.topName=r.name; goGenStep(1); loadGenBot(); })));
+}
+async function loadGenBot(){
+  const rows=await api('/ui/api/sources/bottom_video'); const el=$('gen-bot-list'); el.innerHTML='';
+  const ok=(rows||[]).filter(r=>r.clip_count);
+  if(!ok.length){ el.innerHTML=emptyGen('нижних'); return; }
+  ok.forEach(r=> el.appendChild(genCard(r.name, `${r.clip_count} клип.`, ()=>{ state.gen.botId=r.id; state.gen.botName=r.name; goGenStep(2); loadGenBan(); })));
+}
+async function loadGenBan(){
+  const rows=await api('/ui/api/banners'); const el=$('gen-ban-list'); el.innerHTML='';
+  if(!rows||!rows.length){ el.innerHTML=emptyGen('баннеров'); return; }
+  rows.forEach(r=> el.appendChild(genCard((r.category==='banner_video'?'📹 ':'🖼 ')+r.name,'', ()=>{ state.gen.banId=r.id; state.gen.banName=r.name; goGenStep(3); updateConfirm(); })));
+}
+function goGenStep(n){
+  for(let i=0;i<=3;i++) $('gen-step-'+i).classList.toggle('hidden', i!==n);
+  state.gen.step=n; renderRail(n,4);
+  if(n===3 && !state.gen.anim) setAnim('slide_left');
+}
+function genBack(n){ goGenStep(n); }
+function setAnim(a,btn){ state.gen.anim=a;
+  document.querySelectorAll('#anim-row-split .anim-btn').forEach(b=>{ b.classList.toggle('btn-primary',b.dataset.anim===a); b.classList.toggle('btn-secondary',b.dataset.anim!==a); }); }
+function updateConfirm(){ $('confirm-top').textContent=state.gen.topName; $('confirm-bot').textContent=state.gen.botName; $('confirm-ban').textContent=state.gen.banName;
+  document.querySelectorAll('#anim-row-split .anim-btn').forEach(b=>{ b.classList.toggle('btn-primary',b.dataset.anim===state.gen.anim); b.classList.toggle('btn-secondary',b.dataset.anim!==state.gen.anim); }); }
+async function doGenerate(){
+  const {topId,botId,banId,anim}=state.gen;
+  if(!topId||!botId||!banId){ toast('Выберите все источники',false); return; }
+  try{ await api('/ui/api/jobs/generate',{method:'POST',json:{top_source_id:topId,bottom_source_id:botId,banner_id:banId,banner_animation:anim}});
+    toast('Сборка запущена!'); showPage('jobs'); }
+  catch(e){ toast('Ошибка: '+e.message,false); }
 }
 
-async function loadGenBot() {
-  const rows = await api('/ui/api/sources/bottom_video');
-  const el = document.getElementById('gen-bot-list');
-  el.innerHTML = '';
-  if (!rows || rows.length === 0) {
-    el.innerHTML = '<p class="text-gray-500 text-sm">Нет источников нижних видео.</p>';
-    return;
-  }
-  rows.forEach(r => {
-    if (!r.clip_count) return;
-    const btn = document.createElement('button');
-    btn.className = 'card w-full p-3 flex items-center justify-between hover:border-brand transition-colors text-left';
-    btn.innerHTML = `<span class="font-medium text-sm">${esc(r.name)}</span><span class="tag-clip">${r.clip_count} клипов</span>`;
-    btn.onclick = () => { state.gen.botId = r.id; state.gen.botName = r.name; goGenStep(2); loadGenBan(); };
-    el.appendChild(btn);
-  });
-  if (!el.children.length) el.innerHTML = '<p class="text-gray-500 text-sm">Нет нарезанных нижних видео.</p>';
+// ── Blog wizard ──
+async function loadGenBlog(){
+  const rows=await api('/ui/api/sources/blog_video'); const el=$('gen-blog-list'); el.innerHTML='';
+  const ok=(rows||[]).filter(r=>r.clip_count);
+  if(!ok.length){ el.innerHTML=emptyGen('блог-видео'); return; }
+  ok.forEach(r=> el.appendChild(genCard(r.name, `${r.unused_count||0} нов.`, ()=>{ state.blog.srcId=r.id; state.blog.srcName=r.name; goBlogStep(1); loadGenBlogBan(); })));
+}
+async function loadGenBlogBan(){
+  const rows=await api('/ui/api/banners'); const el=$('gen-blogban-list'); el.innerHTML='';
+  (rows||[]).forEach(r=> el.appendChild(genCard((r.category==='banner_video'?'📹 ':'🖼 ')+r.name,'', ()=>pickBlogBanner(r.id,r.name))));
+}
+function pickBlogBanner(id,name){ state.blog.banId=id; state.blog.banName=name; goBlogStep(2); updateBlogConfirm(); }
+function goBlogStep(n){
+  for(let i=0;i<=2;i++) $('blog-step-'+i).classList.toggle('hidden', i!==n);
+  state.blog.step=n; renderRail(n,3);
+}
+function blogBack(n){ goBlogStep(n); }
+function setBlogAnim(a,btn){ state.blog.anim=a;
+  document.querySelectorAll('#anim-row-blog [data-anim]').forEach(b=>{ b.classList.toggle('btn-primary',b.dataset.anim===a); b.classList.toggle('btn-secondary',b.dataset.anim!==a); }); }
+function updateBlogConfirm(){ $('confirm-blog').textContent=state.blog.srcName; $('confirm-blogban').textContent=state.blog.banName;
+  $('blog-anim-block').style.display = state.blog.banId ? '' : 'none';
+  document.querySelectorAll('#anim-row-blog [data-anim]').forEach(b=>{ b.classList.toggle('btn-primary',b.dataset.anim===state.blog.anim); b.classList.toggle('btn-secondary',b.dataset.anim!==state.blog.anim); }); }
+async function doGenerateBlog(){
+  const {srcId,banId,anim}=state.blog;
+  if(!srcId){ toast('Выберите блог-видео',false); return; }
+  try{ await api('/ui/api/jobs/single-generate',{method:'POST',json:{source_id:srcId,banner_id:banId,banner_animation:anim}});
+    toast('Сборка клипа запущена!'); showPage('jobs'); }
+  catch(e){ toast('Ошибка: '+e.message,false); }
 }
 
-async function loadGenBan() {
-  const rows = await api('/ui/api/banners');
-  const el = document.getElementById('gen-ban-list');
-  el.innerHTML = '';
-  rows.forEach(r => {
-    const btn = document.createElement('button');
-    btn.className = 'card w-full p-3 text-left hover:border-brand transition-colors text-sm';
-    btn.textContent = (r.category === 'banner_video' ? '📹 ' : '🖼️ ') + r.name;
-    btn.onclick = () => { state.gen.banId = r.id; state.gen.banName = r.name; goGenStep(3); updateConfirm(); };
-    el.appendChild(btn);
-  });
-  if (!el.children.length) el.innerHTML = '<p class="text-gray-500 text-sm">Нет баннеров.</p>';
+function genCard(title, chip, onclick){
+  const b=document.createElement('button');
+  b.className='surface hover-line w-full p-3 flex items-center justify-between gap-2 text-left';
+  b.innerHTML=`<span class="font-semibold text-sm truncate">${esc(title)}</span>${chip?`<span class="chip chip-new flex-shrink-0">${esc(chip)}</span>`:''}`;
+  b.onclick=onclick; return b;
 }
-
-function goGenStep(n) {
-  for (let i = 0; i <= 3; i++) {
-    const el = document.getElementById('gen-step-' + i);
-    el.classList.toggle('hidden', i !== n);
-    const dot = document.getElementById('sdot-' + i);
-    dot.className = 'step-dot ' + (i < n ? 'done' : i === n ? 'active' : 'idle');
-  }
-  state.gen.step = n;
-}
-
-function genBack(n) { goGenStep(n); }
-
-function setAnim(a) {
-  state.gen.anim = a;
-  document.querySelectorAll('.anim-btn').forEach(b => {
-    b.classList.toggle('btn-primary', b.dataset.anim === a);
-    b.classList.toggle('btn-secondary', b.dataset.anim !== a);
-  });
-}
-
-function updateConfirm() {
-  document.getElementById('confirm-top').textContent = state.gen.topName;
-  document.getElementById('confirm-bot').textContent = state.gen.botName;
-  document.getElementById('confirm-ban').textContent = state.gen.banName;
-}
-
-async function doGenerate() {
-  const { topId, botId, banId, anim } = state.gen;
-  if (!topId || !botId || !banId) { toast('Выберите все источники', false); return; }
-  try {
-    const job = await api('/ui/api/jobs/generate', {
-      method: 'POST',
-      json: { top_source_id: topId, bottom_source_id: botId, banner_id: banId, banner_animation: anim },
-    });
-    toast('Генерация запущена!');
-    startJobPoll();
-    showPage('jobs');
-  } catch (e) {
-    toast('Ошибка: ' + e.message, false);
-  }
-}
+function emptyGen(what){ return `<div class="surface p-6 text-center text-sm" style="color:var(--muted)">
+  Нет нарезанных ${what} источников.<br><span style="color:var(--faint)" class="text-xs">Загрузите и нарежьте их во вкладке «Материалы».</span></div>`; }
 
 // ─── Jobs ─────────────────────────────────────────────────────────────────────
-async function loadJobs() {
-  const jobs = await api('/ui/api/jobs');
-  const el = document.getElementById('jobs-list');
-  if (!jobs || jobs.length === 0) {
-    el.innerHTML = '<p class="text-gray-500 text-sm text-center py-8">Задач пока нет</p>';
-    updateJobsBadge(0);
-    stopJobPoll();
-    return;
+async function loadJobs(){
+  const jobs=await api('/ui/api/jobs'); const el=$('jobs-list');
+  if(!jobs||jobs.length===0){
+    el.innerHTML=`<div class="surface p-8 text-center"><div class="text-2xl mb-2">⚡</div>
+      <p class="text-sm" style="color:var(--muted)">Очередь пуста. Запустите нарезку или сборку.</p></div>`;
+    updateJobsBadge(0); stopJobPoll(); return;
   }
-  el.innerHTML = jobs.map(j => renderJob(j)).join('');
-  const running = jobs.filter(j => j.state === 'pending' || j.state === 'running').length;
+  el.innerHTML=jobs.map(renderJob).join('');
+  const running=jobs.filter(j=>j.state==='pending'||j.state==='running').length;
   updateJobsBadge(running);
-  // stop polling when all jobs are finished
-  if (running === 0) stopJobPoll();
-  else startJobPoll();
+  running===0 ? stopJobPoll() : startJobPoll();
 }
-
-function renderJob(j) {
-  const icons = { pending: '🕐', running: '<span class="spinner"></span>', done: '✅', error: '❌' };
-  const dl = j.state === 'done' && j.type === 'generate'
-    ? `<a href="/ui/api/download/${j.id}" download="short_${j.id}.mp4" class="btn btn-primary btn-sm">⬇️ Скачать</a>` : '';
-  return `
-    <div class="card p-4 job-${j.state}">
-      <div class="flex items-center justify-between gap-3 flex-wrap">
-        <div class="flex items-center gap-2 text-sm">
-          ${icons[j.state]}
-          <span class="font-medium">${j.type === 'cut' ? '✂️ Нарезка' : '🎬 Генерация'}</span>
-          <span class="text-gray-400 text-xs">#${j.id}</span>
-        </div>
-        ${dl}
-      </div>
-      <p class="text-gray-400 text-xs mt-2">${esc(j.message || '')}</p>
-      ${j.error ? `<p class="text-red-400 text-xs mt-1">${esc(j.error)}</p>` : ''}
+function renderJob(j){
+  const ico={ pending:'🕓', running:'<span class="spinner"></span>', done:'✓', error:'✕' }[j.state]||'';
+  const typ = j.type==='cut' ? '✂ Нарезка' : '🎬 Сборка';
+  const dl = (j.state==='done'&&j.type==='generate')
+    ? `<a href="/ui/api/download/${j.id}" download="short_${j.id}.mp4" class="btn btn-primary btn-sm">⬇ Скачать</a>` : '';
+  const showBar = j.state==='pending'||j.state==='running';
+  return `<div class="surface job ${j.state} p-4">
+    <div class="flex items-center justify-between gap-3 flex-wrap">
+      <div class="flex items-center gap-2 text-sm">
+        <span style="color:${j.state==='done'?'var(--live)':j.state==='error'?'var(--danger)':'var(--ink)'}">${ico}</span>
+        <span class="font-semibold">${typ}</span>
+        <span class="mono text-xs" style="color:var(--faint)">#${esc(String(j.id)).slice(0,8)}</span>
+      </div>${dl}
     </div>
-  `;
+    <p class="text-xs mt-2" style="color:var(--muted)">${esc(j.message||'')}</p>
+    ${showBar?`<div class="bar-track mt-2"><div class="bar-indet"></div></div>`:''}
+    ${j.error?`<p class="text-xs mt-1" style="color:var(--danger)">${esc(j.error)}</p>`:''}
+  </div>`;
 }
+function updateJobsBadge(n){ const b=$('jobs-badge'); b.textContent=n; b.classList.toggle('hidden', n===0); }
+function startJobPoll(){ if(jobPollTimer)return; jobPollTimer=setInterval(loadJobs,2500); }
+function stopJobPoll(){ clearInterval(jobPollTimer); jobPollTimer=null; }
 
-function updateJobsBadge(n) {
-  const b = document.getElementById('jobs-badge');
-  b.textContent = n;
-  b.classList.toggle('hidden', n === 0);
+// ─── Preview (9:16 viewfinder) ──────────────────────────────────────────────────
+function openPreview(fileId, name, isImage){
+  const frame=$('vf-frame');
+  const media = isImage
+    ? `<img src="/ui/api/preview/${fileId}" alt="">`
+    : `<video src="/ui/api/preview/${fileId}" controls autoplay playsinline></video>`;
+  frame.innerHTML = media +
+    `<span class="vf-tick vf-tl"></span><span class="vf-tick vf-tr"></span>
+     <span class="vf-tick vf-bl"></span><span class="vf-tick vf-br"></span>
+     <span class="vf-meta">${esc(name)}</span>
+     <span class="vf-rec">9:16 · preview</span>`;
+  $('viewfinder').classList.remove('hidden');
 }
-
-function startJobPoll() {
-  if (jobPollTimer) return;
-  jobPollTimer = setInterval(loadJobs, 2500);
+function closePreview(){
+  $('viewfinder').classList.add('hidden');
+  $('vf-frame').innerHTML='';  // stop playback
 }
-
-function stopJobPoll() {
-  clearInterval(jobPollTimer);
-  jobPollTimer = null;
-}
+document.addEventListener('keydown', e=>{ if(e.key==='Escape') closePreview(); });
 
 // ─── API helper ──────────────────────────────────────────────────────────────
-async function api(url, opts = {}) {
-  const init = { method: opts.method || 'GET' };
-  if (opts.json) {
-    init.body = JSON.stringify(opts.json);
-    init.headers = { 'Content-Type': 'application/json' };
-  }
-  const res = await fetch(url, init);
-  if (!res.ok) {
-    const txt = await res.text().catch(() => '');
-    throw new Error(`${res.status} ${txt.slice(0, 200)}`);
-  }
-  return res.json().catch(() => null);
+async function api(url, opts={}){
+  const init={ method:opts.method||'GET' };
+  if(opts.json){ init.body=JSON.stringify(opts.json); init.headers={ 'Content-Type':'application/json' }; }
+  const res=await fetch(url, init);
+  if(!res.ok){ const t=await res.text().catch(()=> ''); throw new Error(`${res.status} ${t.slice(0,200)}`); }
+  return res.json().catch(()=>null);
 }
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function jstr(s){ return "'"+String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/</g,'\\u003c')+"'"; }
 
-function esc(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-
-// ─── Init ────────────────────────────────────────────────────────────────────
+// ─── Init ──────────────────────────────────────────────────────────────────────
 showPage('library');
 switchCat('top_video');
 </script>

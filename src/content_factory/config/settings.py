@@ -56,8 +56,11 @@ SUBTITLE_MARGIN_V = OUTPUT_HEIGHT // 2 - 60   # sits right at the split line
 SUBTITLE_MAX_WORDS = 4
 
 # Whisper model size: tiny | base | small | medium | large
-WHISPER_MODEL = "base"
-WHISPER_LANGUAGE = None  # None = auto-detect
+# RAM footprint (approx, peak during transcription):
+#   tiny ≈ 0.4 GB · base ≈ 1 GB · small ≈ 2 GB · medium ≈ 5 GB · large ≈ 10 GB
+# On a 2 GB VPS use WHISPER_MODEL=tiny in .env.
+WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "base")
+WHISPER_LANGUAGE = os.environ.get("WHISPER_LANGUAGE") or None  # None = auto-detect
 
 # ---------------------------------------------------------------------------
 # Storage — media library (separate from per-job output/)

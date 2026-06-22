@@ -18,6 +18,7 @@ All paths are under /ui prefix.
 from __future__ import annotations
 
 import asyncio
+import random
 import shutil
 import uuid
 from pathlib import Path
@@ -77,7 +78,7 @@ async def api_sources(category: str) -> list[dict]:
     result = []
     for r in rows:
         d = dict(r)
-        if category in ("top_video", "bottom_video"):
+        if category in ("top_video", "bottom_video", "blog_video"):
             d["unused_count"] = count_unused_clips(WEB_USER_ID, r["id"])
         result.append(d)
     return result
@@ -87,6 +88,31 @@ async def api_sources(category: str) -> list[dict]:
 async def api_clips(source_id: int) -> list[dict]:
     rows = list_clips(WEB_USER_ID, source_id)
     return [dict(r) for r in rows]
+
+
+# ─── Preview: stream a library file (source / clip / banner) ──────────────────
+
+_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+
+
+@router.get("/api/preview/{file_id}")
+async def api_preview(file_id: int) -> FileResponse:
+    """Stream a media file by its library id, for the in-app preview viewer.
+
+    Starlette's FileResponse honours HTTP Range requests, so <video> seeking works.
+    """
+    row = get_file(file_id, WEB_USER_ID)
+    if row is None:
+        raise HTTPException(404, "File not found")
+    path = Path(row["file_path"])
+    if not path.exists():
+        raise HTTPException(410, "File no longer on disk")
+    suffix = path.suffix.lower()
+    if suffix in _IMAGE_SUFFIXES:
+        media = f"image/{'jpeg' if suffix in ('.jpg', '.jpeg') else suffix.lstrip('.')}"
+    else:
+        media = "video/mp4"
+    return FileResponse(str(path), media_type=media)
 
 
 # ─── Library: banners ────────────────────────────────────────────────────────
@@ -333,6 +359,97 @@ async def _run_generate(
             )
 
             mark_used(top_clip_id)
+
+            job_store.update(
+                job_id,
+                state="done",
+                message="Шортс готов!",
+                result={"output_path": str(output_path), "work_dir": str(work_dir)},
+            )
+        except Exception as exc:
+            job_store.update(job_id, state="error", error=str(exc), message="Ошибка генерации")
+
+
+# ─── Jobs: single-video (blog) generate ──────────────────────────────────────
+
+@router.post("/api/jobs/single-generate")
+async def api_job_single_generate(body: dict) -> dict:
+    """
+    Single-clip blog short (one video, optional banner).
+    body: {
+      source_id: int,          # a blog_video source with unused clips
+      banner_id: int | null,   # optional banner overlay
+      banner_animation: str    # optional
+    }
+    """
+    source_id = int(body.get("source_id", 0))
+    banner_id = body.get("banner_id")
+    animation = body.get("banner_animation", BANNER_ANIMATION)
+
+    src_row = get_file(source_id, WEB_USER_ID)
+    if src_row is None:
+        raise HTTPException(404, "Source not found")
+
+    banner_path = None
+    if banner_id:
+        ban_row = get_file(int(banner_id), WEB_USER_ID)
+        if ban_row is None:
+            raise HTTPException(404, "Banner not found")
+        banner_path = Path(ban_row["file_path"])
+
+    clip = pick_random_unused_clip(WEB_USER_ID, source_id)
+    if clip is None:
+        raise HTTPException(409, "No unused clips left — cut more or reset")
+
+    job = job_store.create("generate")
+    asyncio.create_task(_run_single_generate(
+        job_id=job.id,
+        clip_id=clip["id"],
+        clip_path=Path(clip["file_path"]),
+        banner_path=banner_path,
+        banner_animation=animation,
+    ))
+    return job_store.as_dict(job)
+
+
+async def _run_single_generate(
+    *,
+    job_id: str,
+    clip_id: int,
+    clip_path: Path,
+    banner_path: Path | None,
+    banner_animation: str,
+) -> None:
+    loop = asyncio.get_event_loop()
+
+    job_store.update(job_id, message="Ожидание очереди…")
+    async with _heavy_sem:
+        job_store.update(job_id, state="running", message="Генерация субтитров…")
+        work_dir = OUTPUT_DIR / f"web_blog_{job_id}"
+        work_dir.mkdir(parents=True, exist_ok=True)
+
+        try:
+            from content_factory.core.subtitle_generator import generate_subtitles
+            from content_factory.core.video_composer import compose_single
+
+            ass_path = await loop.run_in_executor(
+                None, generate_subtitles, str(clip_path), work_dir
+            )
+
+            job_store.update(job_id, message="Сборка видео FFmpeg…")
+            output_path = work_dir / "output.mp4"
+            await loop.run_in_executor(
+                None,
+                lambda: compose_single(
+                    video=str(clip_path),
+                    subtitle_file=ass_path,
+                    output_path=output_path,
+                    banner_image=str(banner_path) if banner_path else None,
+                    banner_animation=banner_animation,
+                ),
+            )
+
+            mark_used(clip_id)
 
             job_store.update(
                 job_id,

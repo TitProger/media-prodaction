@@ -12,8 +12,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-import whisper
-
+from content_factory.core._sync import HEAVY_LOCK
+from content_factory.core.whisper_cache import get_model as _get_model
 from content_factory.config.settings import (
     OUTPUT_HEIGHT,
     SUBTITLE_ALIGNMENT,
@@ -33,15 +33,6 @@ from content_factory.config.settings import (
 )
 
 logger = logging.getLogger(__name__)
-
-_model_cache: dict = {}
-
-
-def _get_model(name: str):
-    if name not in _model_cache:
-        logger.info("Loading Whisper model '%s'…", name)
-        _model_cache[name] = whisper.load_model(name)
-    return _model_cache[name]
 
 
 _ASS_HEADER = """\
@@ -128,12 +119,15 @@ def generate_subtitles(
     model = _get_model(model_name or WHISPER_MODEL)
 
     logger.info("Transcribing '%s'…", video_path)
-    result = model.transcribe(
-        str(video_path),
-        language=WHISPER_LANGUAGE,
-        word_timestamps=True,
-        verbose=False,
-    )
+    # Serialize the RAM-heavy transcription process-wide (cron + web + bot share
+    # one lock) so two Whisper runs never coexist — critical on a 2 GB VPS.
+    with HEAVY_LOCK:
+        result = model.transcribe(
+            str(video_path),
+            language=WHISPER_LANGUAGE,
+            word_timestamps=True,
+            verbose=False,
+        )
 
     header = _ASS_HEADER.format(
         play_res_y=OUTPUT_HEIGHT,

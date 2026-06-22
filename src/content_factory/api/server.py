@@ -19,6 +19,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Path, UploadFile
 from fastapi.openapi.utils import get_openapi
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
 from content_factory.api.web_routes import router as web_router
@@ -75,10 +76,11 @@ Set `API_SECRET_KEY` in your `.env` file (default: `changeme-set-in-env`).
     contact={"name": "Content Factory"},
 )
 
-# ─── Mount Gradio UI at root "/" ──────────────────────────────────────────────
-import gradio as gr
-from content_factory.ui.app import build_ui as _build_ui
-app = gr.mount_gradio_app(app, _build_ui(), path="/")
+# ─── Root → redirect to the web UI (SPA lives at /ui) ─────────────────────────
+@app.get("/", include_in_schema=False)
+async def _root() -> RedirectResponse:
+    return RedirectResponse(url="/ui")
+
 
 # ─── Pydantic schemas ────────────────────────────────────────────────────────
 
