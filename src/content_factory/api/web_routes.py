@@ -11,6 +11,7 @@ All paths are under /ui prefix.
   DELETE /ui/api/clips/{id}        → delete single clip
   POST /ui/api/jobs/cut            → start AI/split cut job
   POST /ui/api/jobs/generate       → start generate-short job
+  POST /ui/api/jobs/{id}/upload    → publish a finished short to YouTube
   GET  /ui/api/jobs                → list all jobs
   GET  /ui/api/jobs/{id}           → single job status
   GET  /ui/api/download/{id}       → FileResponse for completed generate job
@@ -32,6 +33,11 @@ from content_factory.config.settings import (
     BOTTOM_CLIP_DURATION,
     OUTPUT_DIR,
     WEB_USER_ID,
+    YOUTUBE_AI_DESCRIPTION,
+    YOUTUBE_CLIENT_SECRET,
+    YOUTUBE_DESCRIPTION,
+    YOUTUBE_TAGS,
+    YOUTUBE_TOKEN_FILE,
 )
 from content_factory.db.library import (
     add_file,
@@ -322,6 +328,7 @@ async def api_job_generate(body: dict) -> dict:
         bottom_path=Path(bot_clip["file_path"]),
         banner_path=banner_path,
         banner_animation=animation,
+        title=top_clip["name"],
     ))
     return job_store.as_dict(job)
 
@@ -334,6 +341,7 @@ async def _run_generate(
     bottom_path: Path,
     banner_path: Path | None,
     banner_animation: str,
+    title: str,
 ) -> None:
     loop = asyncio.get_event_loop()
 
@@ -368,7 +376,12 @@ async def _run_generate(
                 job_id,
                 state="done",
                 message="Шортс готов!",
-                result={"output_path": str(output_path), "work_dir": str(work_dir)},
+                result={
+                    "output_path": str(output_path),
+                    "work_dir": str(work_dir),
+                    "title": title,
+                    "mode": "split-screen gaming shorts",
+                },
             )
         except Exception as exc:
             job_store.update(job_id, state="error", error=str(exc), message="Ошибка генерации")
@@ -412,6 +425,7 @@ async def api_job_single_generate(body: dict) -> dict:
         clip_path=Path(clip["file_path"]),
         banner_path=banner_path,
         banner_animation=animation,
+        title=clip["name"],
     ))
     return job_store.as_dict(job)
 
@@ -423,6 +437,7 @@ async def _run_single_generate(
     clip_path: Path,
     banner_path: Path | None,
     banner_animation: str,
+    title: str,
 ) -> None:
     loop = asyncio.get_event_loop()
 
@@ -459,10 +474,109 @@ async def _run_single_generate(
                 job_id,
                 state="done",
                 message="Шортс готов!",
-                result={"output_path": str(output_path), "work_dir": str(work_dir)},
+                result={
+                    "output_path": str(output_path),
+                    "work_dir": str(work_dir),
+                    "title": title,
+                    "mode": "blog talking-head vertical video",
+                },
             )
         except Exception as exc:
             job_store.update(job_id, state="error", error=str(exc), message="Ошибка генерации")
+
+
+# ─── Jobs: upload a finished short to YouTube ────────────────────────────────
+
+@router.post("/api/jobs/{job_id}/upload")
+async def api_job_upload(job_id: str, body: dict | None = None) -> dict:
+    """
+    Publish an already-composed short (a finished `generate` job) to YouTube.
+
+    body: { "privacy": "private" | "unlisted" | "public" }  (optional;
+    falls back to the cron-configured privacy when omitted).
+
+    Reuses the cron pipeline's AI metadata (`_generate_meta`) and the shared
+    `upload_video` / `is_authenticated` helpers — no new pipeline code.
+    """
+    src = job_store.get(job_id)
+    if src is None or src.state != "done" or src.result is None:
+        raise HTTPException(404, "Нет готовой задачи для загрузки")
+
+    output_path = Path(src.result.get("output_path", ""))
+    if not output_path.exists():
+        raise HTTPException(410, "Файл результата больше недоступен")
+
+    from content_factory.core.youtube_uploader import is_authenticated
+
+    if not YOUTUBE_CLIENT_SECRET or not is_authenticated(YOUTUBE_TOKEN_FILE):
+        raise HTTPException(409, "YouTube не авторизован — выполните: python main.py auth-youtube")
+
+    privacy = (body or {}).get("privacy")
+
+    job = job_store.create("upload")
+    asyncio.create_task(_run_upload(
+        job_id=job.id,
+        output_path=output_path,
+        title=src.result.get("title") or "Short",
+        mode=src.result.get("mode") or "split",
+        privacy=privacy,
+    ))
+    return job_store.as_dict(job)
+
+
+async def _run_upload(
+    *,
+    job_id: str,
+    output_path: Path,
+    title: str,
+    mode: str,
+    privacy: str | None,
+) -> None:
+    loop = asyncio.get_event_loop()
+
+    from content_factory.core.youtube_uploader import upload_video
+    from content_factory.scheduler.auto_generate import _generate_meta, get_cron_config
+
+    job_store.update(job_id, state="running", message="Подготовка метаданных…")
+    try:
+        if privacy not in ("private", "unlisted", "public"):
+            privacy = get_cron_config().get("privacy", "private")
+
+        static_tags = [t.strip() for t in YOUTUBE_TAGS.split(",") if t.strip()]
+        meta = {}
+        if YOUTUBE_AI_DESCRIPTION:
+            meta = await loop.run_in_executor(None, _generate_meta, title, mode)
+
+        final_title = meta.get("title") or (title[:87] + " #Shorts")
+        description = meta.get("description") or YOUTUBE_DESCRIPTION
+        tags = meta.get("tags") or static_tags
+
+        job_store.update(job_id, message="Загрузка на YouTube…")
+        video_id = await loop.run_in_executor(
+            None,
+            lambda: upload_video(
+                output_path, final_title,
+                description=description,
+                tags=tags,
+                privacy=privacy,
+                client_secret_path=YOUTUBE_CLIENT_SECRET,
+                token_path=YOUTUBE_TOKEN_FILE,
+            ),
+        )
+        url = f"https://youtube.com/shorts/{video_id}"
+        job_store.update(
+            job_id,
+            state="done",
+            message=f"Опубликовано на YouTube ({privacy})",
+            result={"youtube_url": url, "privacy": privacy},
+        )
+    except Exception as exc:
+        msg = str(exc)
+        if "uploadLimitExceeded" in msg:
+            msg = "Превышен лимит загрузок YouTube — подтвердите аккаунт на youtube.com/verify"
+        elif "quotaExceeded" in msg or "forbidden" in msg.lower():
+            msg = f"YouTube quota/доступ: {msg[:200]}"
+        job_store.update(job_id, state="error", error=msg, message="Ошибка загрузки на YouTube")
 
 
 # ─── Cron settings (runtime-editable auto-upload config) ─────────────────────

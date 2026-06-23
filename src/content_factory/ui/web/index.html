@@ -713,16 +713,40 @@ async function loadJobs(){
       <p class="text-sm" style="color:var(--muted)">Очередь пуста. Запустите нарезку или сборку.</p></div>`;
     updateJobsBadge(0); stopJobPoll(); return;
   }
-  el.innerHTML=jobs.map(renderJob).join('');
+  el.innerHTML=jobs.map(j=>renderJob(j,jobs)).join('');
   const running=jobs.filter(j=>j.state==='pending'||j.state==='running').length;
   updateJobsBadge(running);
   running===0 ? stopJobPoll() : startJobPoll();
 }
-function renderJob(j){
+// Maps a finished "generate" job → the "upload" job spawned for it, so the card
+// can show progress / a YouTube link instead of re-offering the upload button.
+const ytJobMap = {};
+// Per-job privacy choice; persisted across re-renders so polling doesn't reset it.
+const ytPrivacy = {};
+function setYtPrivacy(jobId, v){ ytPrivacy[jobId]=v; }
+const _PV_LABEL = { private:'🔒 Приватно', unlisted:'🔗 По ссылке', public:'🌍 Публично' };
+function renderJob(j, all){
   const ico={ pending:'🕓', running:'<span class="spinner"></span>', done:'✓', error:'✕' }[j.state]||'';
-  const typ = j.type==='cut' ? '✂ Нарезка' : '🎬 Сборка';
-  const dl = (j.state==='done'&&j.type==='generate')
-    ? `<a href="/ui/api/download/${j.id}" download="short_${j.id}.mp4" class="btn btn-primary btn-sm">⬇ Скачать</a>` : '';
+  const typ = j.type==='cut' ? '✂ Нарезка' : j.type==='upload' ? '⬆ Публикация' : '🎬 Сборка';
+  let action='';
+  if(j.type==='generate' && j.state==='done'){
+    const dl = `<a href="/ui/api/download/${j.id}" download="short_${j.id}.mp4" class="btn btn-secondary btn-sm">⬇ Скачать</a>`;
+    const up = ytJobMap[j.id] ? (all||[]).find(x=>x.id===ytJobMap[j.id]) : null;
+    let yt;
+    if(up && (up.state==='pending'||up.state==='running')){
+      yt = `<button class="btn btn-primary btn-sm" disabled><span class="spinner"></span> На YouTube…</button>`;
+    } else if(up && up.state==='done' && up.result && up.result.youtube_url){
+      yt = `<a href="${esc(up.result.youtube_url)}" target="_blank" rel="noopener" class="btn btn-secondary btn-sm">▶ На YouTube</a>`;
+    } else {
+      const cur = ytPrivacy[j.id] || 'private';
+      const opts = ['private','unlisted','public'].map(v=>`<option value="${v}" ${v===cur?'selected':''}>${_PV_LABEL[v]}</option>`).join('');
+      yt = `<select onchange="setYtPrivacy('${j.id}',this.value)" class="input" style="width:auto;padding:.34rem .6rem;font-size:.78rem">${opts}</select>
+        <button onclick="uploadToYt('${j.id}')" class="btn btn-primary btn-sm">⬆ На YouTube</button>`;
+    }
+    action = `<div class="flex items-center gap-2 flex-wrap">${dl}${yt}</div>`;
+  } else if(j.type==='upload' && j.state==='done' && j.result && j.result.youtube_url){
+    action = `<a href="${esc(j.result.youtube_url)}" target="_blank" rel="noopener" class="btn btn-primary btn-sm">▶ Открыть на YouTube</a>`;
+  }
   const showBar = j.state==='pending'||j.state==='running';
   return `<div class="surface job ${j.state} p-4">
     <div class="flex items-center justify-between gap-3 flex-wrap">
@@ -730,12 +754,20 @@ function renderJob(j){
         <span style="color:${j.state==='done'?'var(--live)':j.state==='error'?'var(--danger)':'var(--ink)'}">${ico}</span>
         <span class="font-semibold">${typ}</span>
         <span class="mono text-xs" style="color:var(--faint)">#${esc(String(j.id)).slice(0,8)}</span>
-      </div>${dl}
+      </div>${action}
     </div>
     <p class="text-xs mt-2" style="color:var(--muted)">${esc(j.message||'')}</p>
     ${showBar?`<div class="bar-track mt-2"><div class="bar-indet"></div></div>`:''}
     ${j.error?`<p class="text-xs mt-1" style="color:var(--danger)">${esc(j.error)}</p>`:''}
   </div>`;
+}
+async function uploadToYt(jobId){
+  try{
+    const job = await api(`/ui/api/jobs/${jobId}/upload`, { method:'POST', json:{ privacy: ytPrivacy[jobId]||'private' } });
+    ytJobMap[jobId] = job.id;
+    toast('Загрузка на YouTube запущена…');
+    loadJobs(); startJobPoll();
+  }catch(e){ toast('Ошибка: '+String(e.message||e).slice(0,160), false); }
 }
 function updateJobsBadge(n){ const b=$('jobs-badge'); b.textContent=n; b.classList.toggle('hidden', n===0); }
 function startJobPoll(){ if(jobPollTimer)return; jobPollTimer=setInterval(loadJobs,2500); }
