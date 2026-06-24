@@ -2,6 +2,35 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## ⚠️ Production server — read first
+
+This same checkout also runs on the **production VPS** that serves live users at
+**https://lk.passim-vpn.ru**. You can tell you are on prod when: the OS is **Linux**
+and the working directory is **`/root/media-prodaction`** (locally it is Windows under
+`D:\developer\PassimX\media-prodaction`). Pushing to `main` auto-deploys to this server,
+so a bad commit ships to production within ~1–2 min.
+
+When working **on the prod server**, be conservative — there is real user data here:
+
+- **Never delete or reset the database.** `storage/library.db` holds the whole media
+  library + cron config (`app_settings`). Do **not** `rm` it, `DROP`/`DELETE` rows, or
+  re-init it. An hourly backup exists at `storage/library.db.backup` — never overwrite it
+  with an empty/broken DB. Read with `SELECT` only unless explicitly asked to mutate.
+- **`storage/` is sacred.** It contains user media (`storage/library/{user_id}/…`) **and
+  secrets** that are NOT in git: `.env`, `youtube_token.json`, `client_secret.json`.
+  Never delete the tree, and never print/echo secret contents into logs or chat.
+- **No destructive git on the server.** Do not run `git clean -fdx` / `-fdX` (it wipes
+  gitignored `storage/` and `.env`) or `git checkout -- storage`. `git reset --hard` only
+  touches tracked files but still confirm first.
+- **The YouTube token is live in prod too.** Any `python main.py …` that runs the real
+  pipeline (cron tick, `auth-youtube`, the upload endpoint) actually publishes to the real
+  channel. Don't trigger real uploads to "test" — mock or use guards.
+- **`media-factory` systemd service serves live traffic.** Prefer reading logs
+  (`journalctl -u media-factory -n 100`) over restarting. Only `systemctl restart
+  media-factory` when a deploy/config change requires it.
+- **`output/` is the only throwaway dir** — per-job working folders, safe to clean.
+- When unsure whether an action is reversible on prod, **stop and ask** instead of guessing.
+
 ## What This Project Does
 
 Content Factory is an automated short-form video pipeline (YouTube Shorts / TikTok Reels). It stacks two input videos into a 1080×1920 split-screen frame, burns auto-generated subtitles (via OpenAI Whisper), and composites a banner overlay with fade effects — all via FFmpeg. Three interfaces share the same core pipeline: a Gradio web UI, a Telegram bot, and a CLI.
